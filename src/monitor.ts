@@ -42,8 +42,12 @@ async function checkOnce(
 
     const current = data.utilization;
 
-    // Primary signal: resets_at timestamp changed → Anthropic issued a new window
-    const windowRolled = prev.lastResetsAt !== "" && data.resets_at !== prev.lastResetsAt;
+    // Primary signal: resets_at moved forward by more than 1 hour → Anthropic issued a new window.
+    // We compare numeric timestamps rather than strings to avoid false positives from minor
+    // API fluctuations (e.g. millisecond differences in the returned ISO string).
+    const prevResetMs = prev.lastResetsAt ? new Date(prev.lastResetsAt).getTime() : 0;
+    const currResetMs = new Date(data.resets_at).getTime();
+    const windowRolled = prevResetMs > 0 && (currResetMs - prevResetMs) > 60 * 60 * 1000;
 
     // Secondary signal: utilization dropped sharply (catches edge cases where timestamp
     // doesn't change but usage is clearly reset)
