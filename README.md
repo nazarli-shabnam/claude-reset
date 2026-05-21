@@ -89,9 +89,13 @@ claude-watcher status
 
 ## Running the monitor
 
-```bash
-claude-watcher start
-```
+| Command | What it does |
+|---|---|
+| `claude-watcher start` | Start in background — silent, writes to log file |
+| `claude-watcher start --logs` | Start in terminal with live log output |
+| `claude-watcher stop` | Stop the background process |
+| `claude-watcher logs` | Tail the log file live (Ctrl+C to exit) |
+| `claude-watcher status` | One-shot usage snapshot |
 
 ### Auto-start on login (Windows)
 
@@ -125,13 +129,13 @@ systemctl --user enable --now claude-watcher
 ### Stopping the monitor
 
 ```bash
-# If running in terminal
+# If started with --logs (terminal)
 Ctrl + C
 
-# If running in background (Windows PowerShell)
-Stop-Process -Name "node" -Force
+# If running in background
+claude-watcher stop
 
-# Remove Task Scheduler entry permanently
+# Remove Task Scheduler auto-start entry permanently
 Unregister-ScheduledTask -TaskName "claude-watcher" -Confirm:$false
 ```
 
