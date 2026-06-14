@@ -36,7 +36,7 @@ export async function fetchUsage(config: WatcherConfig): Promise<UsageResponse> 
   if (response.status === 401 || response.status === 403) {
     throw new Error(
       `Auth rejected (HTTP ${response.status}). ` +
-      "Your session key may have expired — re-run `claude-watcher init` with a fresh key."
+      "Your session key may have expired — re-run `claude-watch init` with a fresh key."
     );
   }
 

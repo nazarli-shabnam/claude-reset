@@ -1,4 +1,4 @@
-import type { Notifier, UsageResponse, WatcherConfig, WindowKey } from "./types";
+import type { Notifier, UsageResponse, UsageWindow, WatcherConfig, WindowKey } from "./types";
 import { fetchUsage } from "./claudeClient";
 
 // A real reset pushes resets_at forward by 5 hours (5h window) or 7 days (7d window).
@@ -11,9 +11,40 @@ const RESET_WINDOW_MIN_MS = 60 * 60 * 1000;
 // and fire a bogus notification (or miss a real one). Only accept dates after Jan 2020.
 const MIN_PLAUSIBLE_MS = new Date("2020-01-01T00:00:00Z").getTime();
 
-interface WindowState {
+export interface WindowState {
   lastResetsAt: string;
   lastUtilization: number;
+}
+
+/**
+ * Pure reset-detection logic for a single usage window. No I/O — given the previous
+ * baseline and the latest reading, returns whether a reset fired and the baseline to
+ * persist next.
+ *
+ * - First poll (no prev): record baseline, never fire.
+ * - Reset: resets_at moved forward by more than RESET_WINDOW_MIN_MS.
+ * - Implausible/epoch resets_at: keep the previous baseline so it can't poison the
+ *   next comparison.
+ */
+export function detectReset(prev: WindowState | undefined, data: UsageWindow): {
+  fired: boolean;
+  nextState: WindowState;
+} {
+  const fresh: WindowState = { lastResetsAt: data.resets_at, lastUtilization: data.utilization };
+
+  if (!prev) {
+    return { fired: false, nextState: fresh };
+  }
+
+  const prevMs = new Date(prev.lastResetsAt).getTime();
+  const currMs = new Date(data.resets_at).getTime();
+  const fired = currMs - prevMs > RESET_WINDOW_MIN_MS;
+
+  // Only persist a plausible timestamp — discard epoch/bogus values so they can't
+  // poison the baseline and trigger a false positive (or hide a real one) next poll.
+  const nextState = currMs >= MIN_PLAUSIBLE_MS ? fresh : prev;
+
+  return { fired, nextState };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -42,19 +73,9 @@ async function checkOnce(
 
   for (const { key, data, label } of windows) {
     const prev = state.get(key);
+    const { fired, nextState } = detectReset(prev, data);
 
-    if (!prev) {
-      // First poll — just record baseline, never fire on startup
-      state.set(key, { lastResetsAt: data.resets_at, lastUtilization: data.utilization });
-      continue;
-    }
-
-    const prevMs = new Date(prev.lastResetsAt).getTime();
-    const currMs = new Date(data.resets_at).getTime();
-    const delta = currMs - prevMs;
-
-    // Only signal we trust: resets_at moved forward by at least 1 hour
-    if (delta > RESET_WINDOW_MIN_MS) {
+    if (fired && prev) {
       console.log(`[${ts()}] RESET DETECTED — ${label}. Sending notification.`);
 
       await notifier.notify(
@@ -69,12 +90,11 @@ async function checkOnce(
       );
     }
 
-    // Only persist a plausible timestamp — discard epoch/bogus values so they can't
-    // poison the baseline and trigger a false positive (or hide a real one) next poll.
-    if (currMs >= MIN_PLAUSIBLE_MS) {
-      state.set(key, { lastResetsAt: data.resets_at, lastUtilization: data.utilization });
-    } else {
+    if (nextState === prev) {
+      // Implausible timestamp — detectReset kept the previous baseline.
       console.warn(`[${ts()}] Ignoring suspicious resets_at value (${data.resets_at}) for ${label} — keeping previous baseline.`);
+    } else {
+      state.set(key, nextState);
     }
   }
 
@@ -85,7 +105,7 @@ export async function runMonitor(config: WatcherConfig, notifier: Notifier): Pro
   const state = new Map<WindowKey, WindowState>();
   const intervalMs = config.check_interval_minutes * 60 * 1000;
 
-  console.log(`[${ts()}] claude-watcher started — polling every ${config.check_interval_minutes} min`);
+  console.log(`[${ts()}] claude-watch started — polling every ${config.check_interval_minutes} min`);
 
   while (true) {
     try {

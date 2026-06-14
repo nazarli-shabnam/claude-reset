@@ -30,7 +30,7 @@ export class SlackNotifier implements Notifier {
           type: "section",
           text: {
             type: "mrkdwn",
-            text: `:bell: *claude-watcher*\n${message}`,
+            text: `:bell: *claude-watch*\n${message}`,
           },
         },
         ...contextBlock,

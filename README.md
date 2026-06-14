@@ -1,4 +1,4 @@
-# claude-watcher
+# claude-watch
 
 A background monitor that watches your Claude Code usage limits and sends a Slack notification the moment your session resets — no more manually refreshing the settings page.
 
@@ -10,15 +10,16 @@ Claude enforces two rolling usage caps shared across the CLI and web UI:
 - **5-hour window** — short-term rate limit
 - **7-day window** — weekly cap
 
-claude-watcher polls a private Anthropic endpoint every few minutes. It detects a reset in two ways — whichever fires first:
-1. The `resets_at` timestamp changes (Anthropic issued a new window)
-2. Utilization drops from above 5% down to below 5%
+claude-watch polls a private Anthropic endpoint every few minutes. It detects a reset
+when the `resets_at` timestamp jumps forward by more than an hour — the unambiguous signal
+that Anthropic issued a fresh window. (Minor timestamp jitter and occasional epoch/`1970`
+glitches from the API are filtered out so they can't trigger a false alarm.)
 
 When a reset is detected it fires a Slack notification exactly once. Your Slack mobile app will receive it like any other message — no need to keep Slack web open.
 
 **What you see in the terminal while it runs:**
 ```
-[2026-05-21T10:00:00Z] claude-watcher started — polling every 5 min
+[2026-05-21T10:00:00Z] claude-watch started — polling every 5 min
 [2026-05-21T10:00:00Z] 5h: 72% (resets 5/21/26, 4:45 PM)  |  7d: 31% (resets 5/28/26, 2:05 PM)
 [2026-05-21T16:46:00Z] RESET DETECTED — 5-hour window. Sending notification.
 ```
@@ -35,17 +36,29 @@ When a reset is detected it fires a Slack notification exactly once. Your Slack 
 
 ## Installation
 
+The fastest way — install globally so the `claude-watch` command works from anywhere:
+
 ```bash
-git clone https://github.com/your-username/claude-watcher.git
-cd claude-watcher
-npm install
-npm run build
+npm install -g claude-watch
+# or straight from GitHub:
+npm install -g github:nazarli-shabnam/claude-watcher
 ```
 
-Optional — install globally so `claude-watcher` works from anywhere:
+Or work from a clone:
+
 ```bash
-npm install -g .
+git clone https://github.com/nazarli-shabnam/claude-watcher.git
+cd claude-watcher
+npm install        # runs the build automatically (via the `prepare` script)
+npm install -g .   # optional: expose the global `claude-watch` command
 ```
+
+> Using [Bun](https://bun.sh) instead? `bun install` works the same way — it also
+> runs the `prepare` build. Then use `bun run start` / `bun run dev` in place of
+> the `npm` equivalents.
+
+Because the `prepare` script builds `dist/` on install, the global `claude-watch`
+command works immediately — no separate build step needed.
 
 ---
 
@@ -71,7 +84,7 @@ You need two things from your Claude account:
 Run the interactive wizard once:
 
 ```bash
-claude-watcher init
+claude-watch init
 # or without global install:
 node dist/index.js init
 ```
@@ -80,7 +93,7 @@ Your config is saved to `~/.config/claude-watcher/config.json` (Windows: `%USERP
 
 Verify it works:
 ```bash
-claude-watcher status
+claude-watch status
 ```
 ```
   Claude usage snapshot
@@ -95,13 +108,13 @@ claude-watcher status
 
 | Command | What it does |
 |---|---|
-| `claude-watcher start` | Start in background — silent, writes to log file |
-| `claude-watcher start --logs` | Start in terminal with live log output |
-| `claude-watcher stop` | Stop the background process |
-| `claude-watcher logs` | Tail the log file live (Ctrl+C to exit) |
-| `claude-watcher status` | One-shot usage snapshot — current utilization and reset times |
-| `claude-watcher test-notify` | Send a test message to Slack — use this to verify your webhook works |
-| `claude-watcher init` | Re-run setup to update credentials or settings |
+| `claude-watch start` | Start in background — silent, writes to log file |
+| `claude-watch start --logs` | Start in terminal with live log output |
+| `claude-watch stop` | Stop the background process |
+| `claude-watch logs` | Tail the log file live (Ctrl+C to exit) |
+| `claude-watch status` | One-shot usage snapshot — current utilization and reset times |
+| `claude-watch test-notify` | Send a test message to Slack — use this to verify your webhook works |
+| `claude-watch init` | Re-run setup to update credentials or settings |
 
 ### Auto-start on login (Windows)
 
@@ -115,21 +128,21 @@ claude-watcher status
 $action = New-ScheduledTaskAction -Execute "node" -Argument "C:\Users\$env:USERNAME\projects\claude-watcher\dist\index.js start"
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0
-Register-ScheduledTask -TaskName "claude-watcher" -Action $action -Trigger $trigger -Settings $settings
+Register-ScheduledTask -TaskName "claude-watch" -Action $action -Trigger $trigger -Settings $settings
 ```
 
 **macOS** (runs in background, auto-restarts):
 ```bash
-# Create ~/Library/LaunchAgents/com.claude-watcher.plist
+# Create ~/Library/LaunchAgents/com.claude-watch.plist
 # See full plist template in the wiki
-launchctl load ~/Library/LaunchAgents/com.claude-watcher.plist
+launchctl load ~/Library/LaunchAgents/com.claude-watch.plist
 ```
 
 **Linux (systemd)**:
 ```bash
-# Create ~/.config/systemd/user/claude-watcher.service
+# Create ~/.config/systemd/user/claude-watch.service
 # ExecStart=/usr/local/bin/node /path/to/dist/index.js start
-systemctl --user enable --now claude-watcher
+systemctl --user enable --now claude-watch
 ```
 
 ### Stopping the monitor
@@ -139,10 +152,10 @@ systemctl --user enable --now claude-watcher
 Ctrl + C
 
 # If running in background
-claude-watcher stop
+claude-watch stop
 
 # Remove Task Scheduler auto-start entry permanently
-Unregister-ScheduledTask -TaskName "claude-watcher" -Confirm:$false
+Unregister-ScheduledTask -TaskName "claude-watch" -Confirm:$false
 ```
 
 ---
@@ -179,9 +192,25 @@ A **WhatsApp stub** is already in `src/notifier.ts`. To activate it: uncomment `
 | Error | Fix |
 |---|---|
 | `Auth rejected (HTTP 401)` | Session key expired — grab a fresh cookie and re-run `init` |
-| `Config not found` | Run `claude-watcher init` first |
-| Slack never fires | Run `claude-watcher test-notify` to verify your webhook works. If that succeeds but resets still don't notify, check the logs with `claude-watcher logs` to confirm the monitor is running and polling. |
+| `Config not found` | Run `claude-watch init` first |
+| Slack never fires | Run `claude-watch test-notify` to verify your webhook works. If that succeeds but resets still don't notify, check the logs with `claude-watch logs` to confirm the monitor is running and polling. |
 | `node: command not found` | Node.js isn't installed or not on PATH — [download here](https://nodejs.org) |
+
+---
+
+## Testing
+
+The test suite runs on [Bun](https://bun.sh):
+
+```bash
+bun test
+```
+
+It covers the reset-detection state machine, config load/save (including malformed and
+BOM-prefixed files), the Slack/broadcast notifier fan-out, and the usage-API client's
+error handling — all without network access. Tests use the `CLAUDE_WATCHER_CONFIG_DIR`
+environment variable to point config I/O at a temp directory, so they never touch your
+real `~/.config/claude-watcher`.
 
 ---
 

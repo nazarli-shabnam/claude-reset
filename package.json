@@ -1,23 +1,41 @@
 {
-  "name": "claude-watcher",
+  "name": "claude-watch",
   "version": "1.0.0",
   "description": "Background monitor for Claude Code usage limits with Slack notifications",
+  "type": "commonjs",
   "main": "dist/index.js",
   "bin": {
-    "claude-watcher": "dist/index.js"
+    "claude-watch": "dist/index.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "ts-node src/index.ts",
     "start": "node dist/index.js",
-    "watch": "tsc --watch"
+    "watch": "tsc --watch",
+    "test": "bun test",
+    "prepare": "tsc",
+    "prepublishOnly": "tsc"
   },
   "keywords": ["claude", "anthropic", "monitoring", "slack", "claude-code"],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nazarli-shabnam/claude-watcher.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nazarli-shabnam/claude-watcher/issues"
+  },
+  "homepage": "https://github.com/nazarli-shabnam/claude-watcher#readme",
   "engines": {
     "node": ">=18.0.0"
   },
   "devDependencies": {
+    "@types/bun": "^1.1.0",
     "@types/node": "^20.0.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.0"
