@@ -4,28 +4,40 @@ import os from "os";
 import readline from "readline";
 import type { WatcherConfig } from "./types";
 
-const CONFIG_DIR = path.join(os.homedir(), ".config", "claude-watcher");
-const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
-
 const DEFAULTS = {
   check_interval_minutes: 15,
 } satisfies Partial<WatcherConfig>;
 
+// Resolved lazily so tests (and unusual setups) can override the location via
+// CLAUDE_WATCHER_CONFIG_DIR without affecting the default ~/.config path.
+export function getConfigDir(): string {
+  return process.env.CLAUDE_WATCHER_CONFIG_DIR ?? path.join(os.homedir(), ".config", "claude-watcher");
+}
+
 export function getConfigPath(): string {
-  return CONFIG_PATH;
+  return path.join(getConfigDir(), "config.json");
 }
 
 export function configExists(): boolean {
-  return fs.existsSync(CONFIG_PATH);
+  return fs.existsSync(getConfigPath());
 }
 
 export function loadConfig(): WatcherConfig {
-  if (!fs.existsSync(CONFIG_PATH)) {
-    throw new Error(`Config not found at ${CONFIG_PATH}. Run \`claude-watcher init\` to set up.`);
+  const configPath = getConfigPath();
+  if (!fs.existsSync(configPath)) {
+    throw new Error(`Config not found at ${configPath}. Run \`claude-watcher init\` to set up.`);
   }
 
-  const raw = fs.readFileSync(CONFIG_PATH, "utf-8");
-  const parsed = JSON.parse(raw) as Partial<WatcherConfig>;
+  // Strip a leading UTF-8 BOM — editors on Windows often add one, and JSON.parse
+  // rejects it. Without this, a hand-edited config silently crashes the daemon.
+  const raw = fs.readFileSync(configPath, "utf-8").replace(/^﻿/, "");
+
+  let parsed: Partial<WatcherConfig>;
+  try {
+    parsed = JSON.parse(raw) as Partial<WatcherConfig>;
+  } catch (err) {
+    throw new Error(`Config at ${configPath} is not valid JSON: ${(err as Error).message}`);
+  }
 
   assertField(parsed, "session_key");
   assertField(parsed, "org_id");
@@ -35,9 +47,9 @@ export function loadConfig(): WatcherConfig {
 }
 
 export function saveConfig(config: WatcherConfig): void {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.mkdirSync(getConfigDir(), { recursive: true });
   // 0o600 = owner read/write only — protects the session key
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { mode: 0o600 });
+  fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
 // ─── Interactive init ─────────────────────────────────────────────────────────
@@ -65,7 +77,7 @@ export async function runInteractiveInit(): Promise<void> {
     }
 
     saveConfig({ session_key, org_id, slack_webhook_url, check_interval_minutes });
-    console.log(`\n  Config saved to ${CONFIG_PATH}\n`);
+    console.log(`\n  Config saved to ${getConfigPath()}\n`);
   } finally {
     rl.close();
   }
