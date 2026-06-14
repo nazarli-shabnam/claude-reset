@@ -10,9 +10,10 @@ Claude enforces two rolling usage caps shared across the CLI and web UI:
 - **5-hour window** — short-term rate limit
 - **7-day window** — weekly cap
 
-claude-watcher polls a private Anthropic endpoint every few minutes. It detects a reset in two ways — whichever fires first:
-1. The `resets_at` timestamp changes (Anthropic issued a new window)
-2. Utilization drops from above 5% down to below 5%
+claude-watcher polls a private Anthropic endpoint every few minutes. It detects a reset
+when the `resets_at` timestamp jumps forward by more than an hour — the unambiguous signal
+that Anthropic issued a fresh window. (Minor timestamp jitter and occasional epoch/`1970`
+glitches from the API are filtered out so they can't trigger a false alarm.)
 
 When a reset is detected it fires a Slack notification exactly once. Your Slack mobile app will receive it like any other message — no need to keep Slack web open.
 
@@ -38,14 +39,20 @@ When a reset is detected it fires a Slack notification exactly once. Your Slack 
 ```bash
 git clone https://github.com/your-username/claude-watcher.git
 cd claude-watcher
-npm install
-npm run build
+npm install        # runs the build automatically (via the `prepare` script)
 ```
+
+> Using [Bun](https://bun.sh) instead? `bun install` works the same way — it also
+> runs the `prepare` build. Then use `bun run start` / `bun run dev` in place of
+> the `npm` equivalents.
 
 Optional — install globally so `claude-watcher` works from anywhere:
 ```bash
 npm install -g .
 ```
+
+Because the `prepare` script builds `dist/` on install, the global `claude-watcher`
+command works immediately — no separate build step needed.
 
 ---
 
@@ -182,6 +189,22 @@ A **WhatsApp stub** is already in `src/notifier.ts`. To activate it: uncomment `
 | `Config not found` | Run `claude-watcher init` first |
 | Slack never fires | Run `claude-watcher test-notify` to verify your webhook works. If that succeeds but resets still don't notify, check the logs with `claude-watcher logs` to confirm the monitor is running and polling. |
 | `node: command not found` | Node.js isn't installed or not on PATH — [download here](https://nodejs.org) |
+
+---
+
+## Testing
+
+The test suite runs on [Bun](https://bun.sh):
+
+```bash
+bun test
+```
+
+It covers the reset-detection state machine, config load/save (including malformed and
+BOM-prefixed files), the Slack/broadcast notifier fan-out, and the usage-API client's
+error handling — all without network access. Tests use the `CLAUDE_WATCHER_CONFIG_DIR`
+environment variable to point config I/O at a temp directory, so they never touch your
+real `~/.config/claude-watcher`.
 
 ---
 
