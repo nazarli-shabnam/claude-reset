@@ -39,7 +39,7 @@ async function main(): Promise<void> {
 
     case "start": {
       if (!configExists()) {
-        console.error(`No config found at ${getConfigPath()}.\nRun \`claude-watch init\` first.`);
+        console.error(`No config found at ${getConfigPath()}.\nRun \`claude-reset init\` first.`);
         process.exit(1);
       }
 
@@ -59,9 +59,9 @@ async function main(): Promise<void> {
         child.unref();
         fs.closeSync(logFd);
 
-        console.log("claude-watch running in background.");
+        console.log("claude-reset running in background.");
         console.log(`Logs  → ${LOG_PATH}`);
-        console.log(`Stop  → claude-watch stop`);
+        console.log(`Stop  → claude-reset stop`);
         break;
       }
 
@@ -90,7 +90,7 @@ async function main(): Promise<void> {
       const notifier = new SlackNotifier(config.slack_webhook_url);
       try {
         await notifier.notify(
-          "Test message from claude-watch — if you see this, your Slack webhook is working correctly.",
+          "Test message from claude-reset — if you see this, your Slack webhook is working correctly.",
           { window: "five_hour", utilization_before: 89, utilization_after: 2, resets_at: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString() }
         );
         console.log("Test notification sent. Check your Slack channel.");
@@ -104,7 +104,7 @@ async function main(): Promise<void> {
       // Kill the background daemon by the PID it recorded on start. This is
       // path/name independent and works identically on Windows and Unix.
       if (!fs.existsSync(PID_PATH)) {
-        console.log("claude-watch is not running.");
+        console.log("claude-reset is not running.");
         break;
       }
 
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
       };
 
       if (!Number.isInteger(pid) || pid <= 0) {
-        console.log("claude-watch is not running.");
+        console.log("claude-reset is not running.");
         removePidFile();
         break;
       }
@@ -129,10 +129,10 @@ async function main(): Promise<void> {
         } else {
           process.kill(pid, "SIGTERM");
         }
-        console.log("claude-watch stopped.");
+        console.log("claude-reset stopped.");
       } catch {
         // ESRCH / "not found" means the recorded process is already gone (stale PID).
-        console.log("claude-watch is not running (stale PID file removed).");
+        console.log("claude-reset is not running (stale PID file removed).");
       }
       removePidFile();
       break;
@@ -167,7 +167,7 @@ async function main(): Promise<void> {
 
 function printHelp(): void {
   console.log(`
-  claude-watch — Claude Code usage limit monitor
+  claude-reset — Claude Code usage limit monitor
 
   Commands:
     init          Interactive setup (session key, org ID, Slack webhook)

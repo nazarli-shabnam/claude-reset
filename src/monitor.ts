@@ -105,7 +105,7 @@ export async function runMonitor(config: WatcherConfig, notifier: Notifier): Pro
   const state = new Map<WindowKey, WindowState>();
   const intervalMs = config.check_interval_minutes * 60 * 1000;
 
-  console.log(`[${ts()}] claude-watch started — polling every ${config.check_interval_minutes} min`);
+  console.log(`[${ts()}] claude-reset started — polling every ${config.check_interval_minutes} min`);
 
   while (true) {
     try {

@@ -1,4 +1,4 @@
-# claude-watch
+# claude-reset
 
 A background monitor that watches your Claude Code usage limits and sends a Slack notification the moment your session resets — no more manually refreshing the settings page.
 
@@ -10,7 +10,7 @@ Claude enforces two rolling usage caps shared across the CLI and web UI:
 - **5-hour window** — short-term rate limit
 - **7-day window** — weekly cap
 
-claude-watch polls a private Anthropic endpoint every few minutes. It detects a reset
+claude-reset polls a private Anthropic endpoint every few minutes. It detects a reset
 when the `resets_at` timestamp jumps forward by more than an hour — the unambiguous signal
 that Anthropic issued a fresh window. (Minor timestamp jitter and occasional epoch/`1970`
 glitches from the API are filtered out so they can't trigger a false alarm.)
@@ -19,7 +19,7 @@ When a reset is detected it fires a Slack notification exactly once. Your Slack 
 
 **What you see in the terminal while it runs:**
 ```
-[2026-05-21T10:00:00Z] claude-watch started — polling every 5 min
+[2026-05-21T10:00:00Z] claude-reset started — polling every 5 min
 [2026-05-21T10:00:00Z] 5h: 72% (resets 5/21/26, 4:45 PM)  |  7d: 31% (resets 5/28/26, 2:05 PM)
 [2026-05-21T16:46:00Z] RESET DETECTED — 5-hour window. Sending notification.
 ```
@@ -36,28 +36,28 @@ When a reset is detected it fires a Slack notification exactly once. Your Slack 
 
 ## Installation
 
-The fastest way — install globally so the `claude-watch` command works from anywhere:
+The fastest way — install globally so the `claude-reset` command works from anywhere:
 
 ```bash
-npm install -g claude-watch
+npm install -g claude-reset
 # or straight from GitHub:
-npm install -g github:nazarli-shabnam/claude-watcher
+npm install -g github:nazarli-shabnam/claude-reset
 ```
 
 Or work from a clone:
 
 ```bash
-git clone https://github.com/nazarli-shabnam/claude-watcher.git
-cd claude-watcher
+git clone https://github.com/nazarli-shabnam/claude-reset.git
+cd claude-reset
 npm install        # runs the build automatically (via the `prepare` script)
-npm install -g .   # optional: expose the global `claude-watch` command
+npm install -g .   # optional: expose the global `claude-reset` command
 ```
 
 > Using [Bun](https://bun.sh) instead? `bun install` works the same way — it also
 > runs the `prepare` build. Then use `bun run start` / `bun run dev` in place of
 > the `npm` equivalents.
 
-Because the `prepare` script builds `dist/` on install, the global `claude-watch`
+Because the `prepare` script builds `dist/` on install, the global `claude-reset`
 command works immediately — no separate build step needed.
 
 ---
@@ -84,16 +84,16 @@ You need two things from your Claude account:
 Run the interactive wizard once:
 
 ```bash
-claude-watch init
+claude-reset init
 # or without global install:
 node dist/index.js init
 ```
 
-Your config is saved to `~/.config/claude-watcher/config.json` (Windows: `%USERPROFILE%\.config\claude-watcher\config.json`) with owner-only read permissions. **Setup only runs once** — future starts read the file silently. Re-run `init` only if your session key expires (you'll see a 401 error in logs) or you want to change settings.
+Your config is saved to `~/.config/claude-reset/config.json` (Windows: `%USERPROFILE%\.config\claude-reset\config.json`) with owner-only read permissions. **Setup only runs once** — future starts read the file silently. Re-run `init` only if your session key expires (you'll see a 401 error in logs) or you want to change settings.
 
 Verify it works:
 ```bash
-claude-watch status
+claude-reset status
 ```
 ```
   Claude usage snapshot
@@ -108,41 +108,41 @@ claude-watch status
 
 | Command | What it does |
 |---|---|
-| `claude-watch start` | Start in background — silent, writes to log file |
-| `claude-watch start --logs` | Start in terminal with live log output |
-| `claude-watch stop` | Stop the background process |
-| `claude-watch logs` | Tail the log file live (Ctrl+C to exit) |
-| `claude-watch status` | One-shot usage snapshot — current utilization and reset times |
-| `claude-watch test-notify` | Send a test message to Slack — use this to verify your webhook works |
-| `claude-watch init` | Re-run setup to update credentials or settings |
+| `claude-reset start` | Start in background — silent, writes to log file |
+| `claude-reset start --logs` | Start in terminal with live log output |
+| `claude-reset stop` | Stop the background process |
+| `claude-reset logs` | Tail the log file live (Ctrl+C to exit) |
+| `claude-reset status` | One-shot usage snapshot — current utilization and reset times |
+| `claude-reset test-notify` | Send a test message to Slack — use this to verify your webhook works |
+| `claude-reset init` | Re-run setup to update credentials or settings |
 
 ### Auto-start on login (Windows)
 
 **Startup folder** (simplest):
 1. Press **Win + R** → type `shell:startup` → Enter
 2. Right-click → New → Shortcut
-3. Location: `node C:\Users\YourName\projects\claude-watcher\dist\index.js start`
+3. Location: `node C:\Users\YourName\projects\claude-reset\dist\index.js start`
 
 **Task Scheduler** (more reliable, survives crashes):
 ```powershell
-$action = New-ScheduledTaskAction -Execute "node" -Argument "C:\Users\$env:USERNAME\projects\claude-watcher\dist\index.js start"
+$action = New-ScheduledTaskAction -Execute "node" -Argument "C:\Users\$env:USERNAME\projects\claude-reset\dist\index.js start"
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0
-Register-ScheduledTask -TaskName "claude-watch" -Action $action -Trigger $trigger -Settings $settings
+Register-ScheduledTask -TaskName "claude-reset" -Action $action -Trigger $trigger -Settings $settings
 ```
 
 **macOS** (runs in background, auto-restarts):
 ```bash
-# Create ~/Library/LaunchAgents/com.claude-watch.plist
+# Create ~/Library/LaunchAgents/com.claude-reset.plist
 # See full plist template in the wiki
-launchctl load ~/Library/LaunchAgents/com.claude-watch.plist
+launchctl load ~/Library/LaunchAgents/com.claude-reset.plist
 ```
 
 **Linux (systemd)**:
 ```bash
-# Create ~/.config/systemd/user/claude-watch.service
+# Create ~/.config/systemd/user/claude-reset.service
 # ExecStart=/usr/local/bin/node /path/to/dist/index.js start
-systemctl --user enable --now claude-watch
+systemctl --user enable --now claude-reset
 ```
 
 ### Stopping the monitor
@@ -152,17 +152,17 @@ systemctl --user enable --now claude-watch
 Ctrl + C
 
 # If running in background
-claude-watch stop
+claude-reset stop
 
 # Remove Task Scheduler auto-start entry permanently
-Unregister-ScheduledTask -TaskName "claude-watch" -Confirm:$false
+Unregister-ScheduledTask -TaskName "claude-reset" -Confirm:$false
 ```
 
 ---
 
 ## Configuration
 
-`~/.config/claude-watcher/config.json`
+`~/.config/claude-reset/config.json`
 
 | Field | Description | Default |
 |---|---|---|
@@ -192,8 +192,8 @@ A **WhatsApp stub** is already in `src/notifier.ts`. To activate it: uncomment `
 | Error | Fix |
 |---|---|
 | `Auth rejected (HTTP 401)` | Session key expired — grab a fresh cookie and re-run `init` |
-| `Config not found` | Run `claude-watch init` first |
-| Slack never fires | Run `claude-watch test-notify` to verify your webhook works. If that succeeds but resets still don't notify, check the logs with `claude-watch logs` to confirm the monitor is running and polling. |
+| `Config not found` | Run `claude-reset init` first |
+| Slack never fires | Run `claude-reset test-notify` to verify your webhook works. If that succeeds but resets still don't notify, check the logs with `claude-reset logs` to confirm the monitor is running and polling. |
 | `node: command not found` | Node.js isn't installed or not on PATH — [download here](https://nodejs.org) |
 
 ---
@@ -208,9 +208,9 @@ bun test
 
 It covers the reset-detection state machine, config load/save (including malformed and
 BOM-prefixed files), the Slack/broadcast notifier fan-out, and the usage-API client's
-error handling — all without network access. Tests use the `CLAUDE_WATCHER_CONFIG_DIR`
+error handling — all without network access. Tests use the `CLAUDE_RESET_CONFIG_DIR`
 environment variable to point config I/O at a temp directory, so they never touch your
-real `~/.config/claude-watcher`.
+real `~/.config/claude-reset`.
 
 ---
 

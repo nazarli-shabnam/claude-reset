@@ -1,11 +1,11 @@
 {
-  "name": "claude-watch",
+  "name": "claude-reset",
   "version": "1.0.0",
   "description": "Background monitor for Claude Code usage limits with Slack notifications",
   "type": "commonjs",
   "main": "dist/index.js",
   "bin": {
-    "claude-watch": "dist/index.js"
+    "claude-reset": "dist/index.js"
   },
   "files": [
     "dist",
@@ -25,12 +25,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/nazarli-shabnam/claude-watcher.git"
+    "url": "https://github.com/nazarli-shabnam/claude-reset.git"
   },
   "bugs": {
-    "url": "https://github.com/nazarli-shabnam/claude-watcher/issues"
+    "url": "https://github.com/nazarli-shabnam/claude-reset/issues"
   },
-  "homepage": "https://github.com/nazarli-shabnam/claude-watcher#readme",
+  "homepage": "https://github.com/nazarli-shabnam/claude-reset#readme",
   "engines": {
     "node": ">=18.0.0"
   },

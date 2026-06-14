@@ -16,16 +16,16 @@ const SAMPLE: WatcherConfig = {
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cw-config-"));
-  process.env.CLAUDE_WATCHER_CONFIG_DIR = tmpDir;
+  process.env.CLAUDE_RESET_CONFIG_DIR = tmpDir;
 });
 
 afterEach(() => {
-  delete process.env.CLAUDE_WATCHER_CONFIG_DIR;
+  delete process.env.CLAUDE_RESET_CONFIG_DIR;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe("config", () => {
-  test("getConfigPath honors CLAUDE_WATCHER_CONFIG_DIR", () => {
+  test("getConfigPath honors CLAUDE_RESET_CONFIG_DIR", () => {
     expect(getConfigPath()).toBe(path.join(tmpDir, "config.json"));
   });
 
