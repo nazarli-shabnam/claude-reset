@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 import fs from "fs";
 import path from "path";
-import os from "os";
 import { spawn } from "child_process";
-import { loadConfig, runInteractiveInit, configExists, getConfigPath } from "./config";
+import { loadConfig, runInteractiveInit, configExists, getConfigPath, getConfigDir } from "./config";
 import { runMonitor } from "./monitor";
 import { SlackNotifier, BroadcastNotifier } from "./notifier";
 import { fetchUsage } from "./claudeClient";
 
-const LOG_PATH = path.join(os.homedir(), ".config", "claude-watcher", "watcher.log");
+const LOG_PATH = path.join(getConfigDir(), "watcher.log");
+const PID_PATH = path.join(getConfigDir(), "watcher.pid");
 
 const COMMANDS = ["init", "start", "status", "stop", "logs", "test-notify", "help"] as const;
 type Command = (typeof COMMANDS)[number];
@@ -65,7 +65,20 @@ async function main(): Promise<void> {
         break;
       }
 
-      // --logs or --daemon: run the monitor directly in this process
+      // --logs or --daemon: run the monitor directly in this process.
+      // The background daemon records its PID so `stop` can kill it reliably,
+      // without grepping the OS process list.
+      if (isDaemon) {
+        fs.mkdirSync(path.dirname(PID_PATH), { recursive: true });
+        fs.writeFileSync(PID_PATH, String(process.pid));
+        const cleanup = () => {
+          try { fs.unlinkSync(PID_PATH); } catch { /* already gone */ }
+        };
+        process.on("exit", cleanup);
+        process.on("SIGTERM", () => { cleanup(); process.exit(0); });
+        process.on("SIGINT", () => { cleanup(); process.exit(0); });
+      }
+
       const config = loadConfig();
       const notifier = new BroadcastNotifier([new SlackNotifier(config.slack_webhook_url)]);
       await runMonitor(config, notifier);
@@ -88,28 +101,40 @@ async function main(): Promise<void> {
     }
 
     case "stop": {
-      // Locate and kill any background claude-watcher daemon
+      // Kill the background daemon by the PID it recorded on start. This is
+      // path/name independent and works identically on Windows and Unix.
+      if (!fs.existsSync(PID_PATH)) {
+        console.log("claude-watcher is not running.");
+        break;
+      }
+
+      const raw = fs.readFileSync(PID_PATH, "utf-8").trim();
+      const pid = Number.parseInt(raw, 10);
+
+      const removePidFile = () => {
+        try { fs.unlinkSync(PID_PATH); } catch { /* already gone */ }
+      };
+
+      if (!Number.isInteger(pid) || pid <= 0) {
+        console.log("claude-watcher is not running.");
+        removePidFile();
+        break;
+      }
+
       try {
-        const { execSync } = await import("child_process");
-        // Works on Windows (wmic) and Unix (pgrep)
         if (process.platform === "win32") {
-          // wmic is deprecated on Windows 11 22H2+ — use Get-CimInstance instead.
-          // Filter by Name=node.exe to avoid the query's own PowerShell process
-          // self-matching (its command line contains the search strings as literals).
-          const out = execSync(
-            `powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -like '*claude-watcher*' -and $_.CommandLine -like '*--daemon*' } | Select-Object -ExpandProperty ProcessId"`,
-            { encoding: "utf-8" }
-          );
-          const pids = out.trim().split(/\r?\n/).map((l) => l.trim()).filter((l) => /^\d+$/.test(l));
-          if (!pids.length) { console.log("claude-watcher is not running."); break; }
-          pids.forEach((pid) => execSync(`taskkill /PID ${pid} /F`));
+          // taskkill terminates the whole tree and is reliable for detached procs.
+          const { execSync } = await import("child_process");
+          execSync(`taskkill /PID ${pid} /F /T`, { stdio: "ignore" });
         } else {
-          execSync(`pkill -f "claude-watcher.*--daemon"`);
+          process.kill(pid, "SIGTERM");
         }
         console.log("claude-watcher stopped.");
       } catch {
-        console.log("claude-watcher is not running.");
+        // ESRCH / "not found" means the recorded process is already gone (stale PID).
+        console.log("claude-watcher is not running (stale PID file removed).");
       }
+      removePidFile();
       break;
     }
 
