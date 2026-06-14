@@ -25,7 +25,7 @@ export function configExists(): boolean {
 export function loadConfig(): WatcherConfig {
   const configPath = getConfigPath();
   if (!fs.existsSync(configPath)) {
-    throw new Error(`Config not found at ${configPath}. Run \`claude-watcher init\` to set up.`);
+    throw new Error(`Config not found at ${configPath}. Run \`claude-watch init\` to set up.`);
   }
 
   // Strip a leading UTF-8 BOM — editors on Windows often add one, and JSON.parse
@@ -62,7 +62,7 @@ export async function runInteractiveInit(): Promise<void> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
   try {
-    console.log("\n  claude-watcher — first-time setup\n");
+    console.log("\n  claude-watch — first-time setup\n");
     console.log("  Find your session key in browser DevTools → Application → Cookies → claude.ai → sessionKey");
     console.log("  Find your org_id in any authenticated request to claude.ai/api/organizations/<uuid>\n");
 
@@ -87,6 +87,6 @@ export async function runInteractiveInit(): Promise<void> {
 
 function assertField(obj: Partial<WatcherConfig>, key: keyof WatcherConfig): void {
   if (!obj[key]) {
-    throw new Error(`Config is missing required field: "${key}". Re-run \`claude-watcher init\`.`);
+    throw new Error(`Config is missing required field: "${key}". Re-run \`claude-watch init\`.`);
   }
 }
