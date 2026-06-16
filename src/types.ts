@@ -12,9 +12,15 @@ export interface UsageResponse {
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-export interface WatcherConfig {
+/** A single Claude account to monitor. The name labels its logs and notifications. */
+export interface Account {
+  name: string;
   session_key: string;
   org_id: string;
+}
+
+export interface WatcherConfig {
+  accounts: Account[];
   slack_webhook_url: string;
   check_interval_minutes: number;
 }

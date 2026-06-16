@@ -1,12 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { fetchUsage } from "./claudeClient";
-import type { WatcherConfig } from "./types";
+import type { Account } from "./types";
 
-const CONFIG: WatcherConfig = {
+const CONFIG: Account = {
+  name: "test",
   session_key: "sk-ant-sid01-test",
   org_id: "org-uuid",
-  slack_webhook_url: "https://hooks.slack.com/services/T/B/X",
-  check_interval_minutes: 15,
 };
 
 const realFetch = globalThis.fetch;

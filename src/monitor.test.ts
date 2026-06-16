@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test";
-import { detectReset, type WindowState } from "./monitor";
-import type { UsageWindow } from "./types";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { checkOnce, detectReset, type WindowState } from "./monitor";
+import type { Account, NotificationContext, Notifier, UsageWindow, WindowKey } from "./types";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -58,5 +58,62 @@ describe("detectReset", () => {
 
     expect(fired).toBe(false);
     expect(nextState).toBe(prev); // same reference — baseline preserved
+  });
+});
+
+describe("checkOnce", () => {
+  const realFetch = globalThis.fetch;
+  let nextUsage: { five_hour: UsageWindow; seven_day: UsageWindow };
+
+  function recordingNotifier(): { notifier: Notifier; messages: string[] } {
+    const messages: string[] = [];
+    return {
+      messages,
+      notifier: {
+        async notify(message: string, _context?: NotificationContext) {
+          messages.push(message);
+        },
+      },
+    };
+  }
+
+  beforeEach(() => {
+    globalThis.fetch = (async () => new Response(JSON.stringify(nextUsage), { status: 200 })) as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  const account: Account = { name: "work", session_key: "sk-ant-sid01-x", org_id: "o" };
+
+  test("prefixes the notification with the account name on reset", async () => {
+    const state = new Map<WindowKey, WindowState>();
+    const { notifier, messages } = recordingNotifier();
+
+    // First poll: record baseline, no notification.
+    nextUsage = { five_hour: window(isoFromNow(1 * HOUR), 90), seven_day: window(isoFromNow(48 * HOUR), 50) };
+    await checkOnce(account, state, notifier);
+    expect(messages).toHaveLength(0);
+
+    // Second poll: 5h window jumped forward → reset fires, tagged with the account name.
+    nextUsage = { five_hour: window(isoFromNow(6 * HOUR), 1), seven_day: window(isoFromNow(48 * HOUR), 50) };
+    await checkOnce(account, state, notifier);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain("[work]");
+  });
+
+  test("per-account state maps stay independent", async () => {
+    const stateA = new Map<WindowKey, WindowState>();
+    const stateB = new Map<WindowKey, WindowState>();
+    const { notifier } = recordingNotifier();
+
+    nextUsage = { five_hour: window(isoFromNow(1 * HOUR), 90), seven_day: window(isoFromNow(48 * HOUR), 50) };
+    await checkOnce(account, stateA, notifier);
+
+    // stateB has never been seeded, so its first poll only records a baseline.
+    expect(stateB.size).toBe(0);
+    expect(stateA.get("five_hour")?.lastUtilization).toBe(90);
   });
 });
