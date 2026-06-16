@@ -2,6 +2,8 @@
 
 A background monitor that watches your Claude Code usage limits and sends a Slack notification the moment your session resets — no more manually refreshing the settings page.
 
+Run multiple Claude accounts? claude-reset watches **all of them at once** and tags every notification with the account name — so it doesn't matter how you switch your active session (`cswap`, manual re-login, etc.); the monitor tracks each account independently.
+
 ---
 
 ## How it works
@@ -19,9 +21,10 @@ When a reset is detected it fires a Slack notification exactly once. Your Slack 
 
 **What you see in the terminal while it runs:**
 ```
-[2026-05-21T10:00:00Z] claude-reset started — polling every 5 min
-[2026-05-21T10:00:00Z] 5h: 72% (resets 5/21/26, 4:45 PM)  |  7d: 31% (resets 5/28/26, 2:05 PM)
-[2026-05-21T16:46:00Z] RESET DETECTED — 5-hour window. Sending notification.
+[2026-05-21T10:00:00Z] claude-reset started — polling every 5 min — watching 2 account(s): work, personal
+[2026-05-21T10:00:00Z] [work] 5h: 72% (resets 5/21/26, 4:45 PM)  |  7d: 31% (resets 5/28/26, 2:05 PM)
+[2026-05-21T10:00:00Z] [personal] 5h: 12% (resets 5/21/26, 1:10 PM)  |  7d: 8% (resets 5/27/26, 9:00 AM)
+[2026-05-21T16:46:00Z] [work] RESET DETECTED — 5-hour window. Sending notification.
 ```
 
 ---
@@ -91,6 +94,22 @@ node dist/index.js init
 
 Your config is saved to `~/.config/claude-reset/config.json` (Windows: `%USERPROFILE%\.config\claude-reset\config.json`) with owner-only read permissions. **Setup only runs once** — future starts read the file silently. Re-run `init` only if your session key expires (you'll see a 401 error in logs) or you want to change settings.
 
+### Watching more than one account
+
+`init` configures your first account. Add others with `add-account`:
+
+```bash
+claude-reset add-account     # prompts for a name + that account's session key + org_id
+claude-reset accounts        # list configured accounts
+claude-reset remove-account work
+```
+
+Each account needs **its own** browser session key and org_id — grab them while logged
+into that account (see *Finding your credentials* above). Account-switchers like
+[`cswap`](https://github.com/realiti4/claude-swap) rotate Claude Code's OAuth tokens,
+which are a *different* credential from the `sessionKey` cookie this tool uses, so they
+can't be reused here. The Slack webhook and check interval are shared across all accounts.
+
 Verify it works:
 ```bash
 claude-reset status
@@ -98,8 +117,13 @@ claude-reset status
 ```
   Claude usage snapshot
 
-  5-hour:   72%  →  resets 5/21/26, 4:45 PM
-  7-day:    31%  →  resets 5/28/26, 2:05 PM
+  work
+    5-hour:   72%  →  resets 5/21/26, 4:45 PM
+    7-day:    31%  →  resets 5/28/26, 2:05 PM
+
+  personal
+    5-hour:   12%  →  resets 5/21/26, 1:10 PM
+    7-day:     8%  →  resets 5/27/26, 9:00 AM
 ```
 
 ---
@@ -112,8 +136,11 @@ claude-reset status
 | `claude-reset start --logs` | Start in terminal with live log output |
 | `claude-reset stop` | Stop the background process |
 | `claude-reset logs` | Tail the log file live (Ctrl+C to exit) |
-| `claude-reset status` | One-shot usage snapshot — current utilization and reset times |
+| `claude-reset status` | One-shot usage snapshot for every account — current utilization and reset times |
 | `claude-reset test-notify` | Send a test message to Slack — use this to verify your webhook works |
+| `claude-reset add-account` | Add another Claude account to monitor |
+| `claude-reset remove-account <name>` | Remove an account by name |
+| `claude-reset accounts` | List configured accounts |
 | `claude-reset init` | Re-run setup to update credentials or settings |
 
 ### Auto-start on login (Windows)
@@ -164,12 +191,28 @@ Unregister-ScheduledTask -TaskName "claude-reset" -Confirm:$false
 
 `~/.config/claude-reset/config.json`
 
+```json
+{
+  "accounts": [
+    { "name": "work",     "session_key": "sk-ant-sid01-...", "org_id": "..." },
+    { "name": "personal", "session_key": "sk-ant-sid01-...", "org_id": "..." }
+  ],
+  "slack_webhook_url": "https://hooks.slack.com/services/...",
+  "check_interval_minutes": 15
+}
+```
+
 | Field | Description | Default |
 |---|---|---|
-| `session_key` | `sk-ant-sid01-...` cookie value | required |
-| `org_id` | Claude organization UUID | required |
-| `slack_webhook_url` | Slack Incoming Webhook URL | required |
+| `accounts[].name` | Label shown in logs and notifications | required |
+| `accounts[].session_key` | `sk-ant-sid01-...` cookie value for that account | required |
+| `accounts[].org_id` | Claude organization UUID for that account | required |
+| `slack_webhook_url` | Slack Incoming Webhook URL (shared by all accounts) | required |
 | `check_interval_minutes` | How often to poll | `15` |
+
+> **Upgrading from a single-account version?** Old configs with top-level `session_key`
+> and `org_id` are migrated automatically into a single account named `default` — no
+> action needed.
 
 ---
 
@@ -218,12 +261,12 @@ real `~/.config/claude-reset`.
 
 ```
 src/
-  types.ts          Shared interfaces — UsageResponse, WatcherConfig, Notifier
-  config.ts         Config file read/write + interactive init wizard
+  types.ts          Shared interfaces — UsageResponse, Account, WatcherConfig, Notifier
+  config.ts         Config file read/write, account management, interactive wizards
   claudeClient.ts   HTTP fetch to the private Anthropic usage endpoint
   notifier.ts       SlackNotifier, BroadcastNotifier, WhatsApp stub
-  monitor.ts        Polling loop + reset-detection state machine
-  index.ts          CLI entry point — init / start / status / help
+  monitor.ts        Per-account polling loop + reset-detection state machine
+  index.ts          CLI entry point — init / add-account / start / status / help
 ```
 
 ---
