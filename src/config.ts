@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import readline from "readline";
-import type { WatcherConfig } from "./types";
+import type { Account, WatcherConfig } from "./types";
 
 const DEFAULTS = {
   check_interval_minutes: 15,
@@ -32,18 +32,41 @@ export function loadConfig(): WatcherConfig {
   // rejects it. Without this, a hand-edited config silently crashes the daemon.
   const raw = fs.readFileSync(configPath, "utf-8").replace(/^﻿/, "");
 
-  let parsed: Partial<WatcherConfig>;
+  let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(raw) as Partial<WatcherConfig>;
+    parsed = JSON.parse(raw) as Record<string, unknown>;
   } catch (err) {
     throw new Error(`Config at ${configPath} is not valid JSON: ${(err as Error).message}`);
   }
 
-  assertField(parsed, "session_key");
-  assertField(parsed, "org_id");
-  assertField(parsed, "slack_webhook_url");
+  const migrated = migrate(parsed);
 
-  return { ...DEFAULTS, ...parsed } as WatcherConfig;
+  if (!migrated.slack_webhook_url) {
+    throw new Error(`Config is missing required field: "slack_webhook_url". Re-run \`claude-reset init\`.`);
+  }
+  if (!Array.isArray(migrated.accounts) || migrated.accounts.length === 0) {
+    throw new Error(`Config has no accounts. Run \`claude-reset init\` (or \`claude-reset add-account\`).`);
+  }
+  for (const account of migrated.accounts) {
+    assertAccountField(account, "name");
+    assertAccountField(account, "session_key");
+    assertAccountField(account, "org_id");
+  }
+
+  return { ...DEFAULTS, ...migrated } as WatcherConfig;
+}
+
+// Migrate a legacy single-account config (top-level session_key/org_id) to the
+// accounts[] shape so existing installs keep working without re-running `init`.
+function migrate(parsed: Record<string, unknown>): Partial<WatcherConfig> {
+  if (!parsed.accounts && (parsed.session_key || parsed.org_id)) {
+    const { session_key, org_id, ...rest } = parsed;
+    return {
+      ...rest,
+      accounts: [{ name: "default", session_key, org_id } as Account],
+    } as Partial<WatcherConfig>;
+  }
+  return parsed as Partial<WatcherConfig>;
 }
 
 export function saveConfig(config: WatcherConfig): void {
@@ -66,6 +89,8 @@ export async function runInteractiveInit(): Promise<void> {
     console.log("  Find your session key in browser DevTools → Application → Cookies → claude.ai → sessionKey");
     console.log("  Find your org_id in any authenticated request to claude.ai/api/organizations/<uuid>\n");
 
+    const nameRaw           = (await prompt(rl, "  Account name [default]:         ")).trim();
+    const name              = nameRaw === "" ? "default" : nameRaw;
     const session_key       = (await prompt(rl, "  Session key (sk-ant-sid01-...): ")).trim();
     const org_id            = (await prompt(rl, "  Organization UUID:              ")).trim();
     const slack_webhook_url = (await prompt(rl, "  Slack webhook URL:              ")).trim();
@@ -76,17 +101,63 @@ export async function runInteractiveInit(): Promise<void> {
       throw new Error("Interval must be a positive integer.");
     }
 
-    saveConfig({ session_key, org_id, slack_webhook_url, check_interval_minutes });
-    console.log(`\n  Config saved to ${getConfigPath()}\n`);
+    saveConfig({
+      accounts: [{ name, session_key, org_id }],
+      slack_webhook_url,
+      check_interval_minutes,
+    });
+    console.log(`\n  Config saved to ${getConfigPath()} (account "${name}")\n`);
   } finally {
     rl.close();
   }
 }
 
+export async function runInteractiveAddAccount(): Promise<void> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+  try {
+    console.log("\n  claude-reset — add an account\n");
+    const name        = (await prompt(rl, "  Account name:                   ")).trim();
+    const session_key = (await prompt(rl, "  Session key (sk-ant-sid01-...): ")).trim();
+    const org_id      = (await prompt(rl, "  Organization UUID:              ")).trim();
+
+    addAccount(name, session_key, org_id);
+    console.log(`\n  Account "${name}" added.\n`);
+  } finally {
+    rl.close();
+  }
+}
+
+// ─── Account management ────────────────────────────────────────────────────────
+
+export function addAccount(name: string, session_key: string, org_id: string): void {
+  if (!name || !session_key || !org_id) {
+    throw new Error("Account name, session key, and org_id are all required.");
+  }
+  const config = loadConfig();
+  if (config.accounts.some((a) => a.name === name)) {
+    throw new Error(`An account named "${name}" already exists.`);
+  }
+  config.accounts.push({ name, session_key, org_id });
+  saveConfig(config);
+}
+
+export function removeAccount(name: string): void {
+  const config = loadConfig();
+  if (!config.accounts.some((a) => a.name === name)) {
+    throw new Error(`No account named "${name}".`);
+  }
+  if (config.accounts.length === 1) {
+    throw new Error(`Cannot remove the last account. Run \`claude-reset init\` to reconfigure instead.`);
+  }
+  config.accounts = config.accounts.filter((a) => a.name !== name);
+  saveConfig(config);
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function assertField(obj: Partial<WatcherConfig>, key: keyof WatcherConfig): void {
-  if (!obj[key]) {
-    throw new Error(`Config is missing required field: "${key}". Re-run \`claude-reset init\`.`);
+function assertAccountField(account: Account, key: keyof Account): void {
+  if (!account || !account[key]) {
+    throw new Error(`An account in the config is missing required field: "${key}". Re-run \`claude-reset init\`.`);
   }
 }

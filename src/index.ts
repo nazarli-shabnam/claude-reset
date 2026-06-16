@@ -2,7 +2,15 @@
 import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
-import { loadConfig, runInteractiveInit, configExists, getConfigPath, getConfigDir } from "./config";
+import {
+  loadConfig,
+  runInteractiveInit,
+  runInteractiveAddAccount,
+  removeAccount,
+  configExists,
+  getConfigPath,
+  getConfigDir,
+} from "./config";
 import { runMonitor } from "./monitor";
 import { SlackNotifier, BroadcastNotifier } from "./notifier";
 import { fetchUsage } from "./claudeClient";
@@ -10,7 +18,7 @@ import { fetchUsage } from "./claudeClient";
 const LOG_PATH = path.join(getConfigDir(), "watcher.log");
 const PID_PATH = path.join(getConfigDir(), "watcher.pid");
 
-const COMMANDS = ["init", "start", "status", "stop", "logs", "test-notify", "help"] as const;
+const COMMANDS = ["init", "start", "status", "stop", "logs", "test-notify", "add-account", "remove-account", "accounts", "help"] as const;
 type Command = (typeof COMMANDS)[number];
 
 const [, , rawCommand = "start"] = process.argv;
@@ -25,15 +33,46 @@ async function main(): Promise<void> {
 
     case "status": {
       const config = loadConfig();
-      try {
-        const usage = await fetchUsage(config);
-        console.log("\n  Claude usage snapshot\n");
-        console.log(`  5-hour:  ${pad(usage.five_hour.utilization)}%  →  resets ${fmtDate(usage.five_hour.resets_at)}`);
-        console.log(`  7-day:   ${pad(usage.seven_day.utilization)}%  →  resets ${fmtDate(usage.seven_day.resets_at)}`);
+      console.log("\n  Claude usage snapshot\n");
+      for (const account of config.accounts) {
+        try {
+          const usage = await fetchUsage(account);
+          console.log(`  ${account.name}`);
+          console.log(`    5-hour:  ${pad(usage.five_hour.utilization)}%  →  resets ${fmtDate(usage.five_hour.resets_at)}`);
+          console.log(`    7-day:   ${pad(usage.seven_day.utilization)}%  →  resets ${fmtDate(usage.seven_day.resets_at)}`);
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err);
+          console.log(`  ${account.name}`);
+          console.log(`    failed: ${detail}`);
+        }
         console.log();
-      } catch (err) {
-        die("Failed to fetch usage:", err);
       }
+      break;
+    }
+
+    case "add-account":
+      await runInteractiveAddAccount();
+      break;
+
+    case "remove-account": {
+      const name = args[0];
+      if (!name) die("Usage: claude-reset remove-account <name>");
+      try {
+        removeAccount(name);
+        console.log(`Account "${name}" removed.`);
+      } catch (err) {
+        die("Failed to remove account:", err);
+      }
+      break;
+    }
+
+    case "accounts": {
+      const config = loadConfig();
+      console.log("\n  Configured accounts\n");
+      for (const account of config.accounts) {
+        console.log(`  - ${account.name}  (org ${account.org_id})`);
+      }
+      console.log();
       break;
     }
 
@@ -170,14 +209,20 @@ function printHelp(): void {
   claude-reset — Claude Code usage limit monitor
 
   Commands:
-    init          Interactive setup (session key, org ID, Slack webhook)
-    start         Start in background — silent, writes to log file
-    start --logs  Start in terminal with live log output
-    stop          Stop the background process
-    logs          Tail the log file (Ctrl+C to exit)
-    status        One-shot usage snapshot
-    test-notify   Send a test message to your Slack channel
-    help          Show this help text
+    init                   Interactive setup — first account, Slack webhook, interval
+    add-account            Add another Claude account to monitor
+    remove-account <name>  Remove an account by name
+    accounts               List configured accounts
+    start                  Start in background — silent, writes to log file
+    start --logs           Start in terminal with live log output
+    stop                   Stop the background process
+    logs                   Tail the log file (Ctrl+C to exit)
+    status                 One-shot usage snapshot for every account
+    test-notify            Send a test message to your Slack channel
+    help                   Show this help text
+
+  The daemon watches all configured accounts at once and prefixes
+  every notification with the account name, e.g. "[work] …".
 
   Config file: ${getConfigPath()}
   Log file:    ${LOG_PATH}

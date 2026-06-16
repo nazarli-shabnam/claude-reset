@@ -1,4 +1,4 @@
-import type { UsageResponse, WatcherConfig } from "./types";
+import type { Account, UsageResponse } from "./types";
 
 const BASE_URL = "https://claude.ai";
 
@@ -17,8 +17,8 @@ const BROWSER_HEADERS: Record<string, string> = {
   "sec-fetch-site": "same-origin",
 };
 
-export async function fetchUsage(config: WatcherConfig): Promise<UsageResponse> {
-  const url = `${BASE_URL}/api/organizations/${config.org_id}/usage`;
+export async function fetchUsage(account: Pick<Account, "session_key" | "org_id">): Promise<UsageResponse> {
+  const url = `${BASE_URL}/api/organizations/${account.org_id}/usage`;
 
   let response: Response;
   try {
@@ -26,7 +26,7 @@ export async function fetchUsage(config: WatcherConfig): Promise<UsageResponse> 
       method: "GET",
       headers: {
         ...BROWSER_HEADERS,
-        Cookie: `sessionKey=${config.session_key}`,
+        Cookie: `sessionKey=${account.session_key}`,
       },
     });
   } catch (err) {

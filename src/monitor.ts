@@ -1,4 +1,4 @@
-import type { Notifier, UsageResponse, UsageWindow, WatcherConfig, WindowKey } from "./types";
+import type { Account, Notifier, UsageResponse, UsageWindow, WatcherConfig, WindowKey } from "./types";
 import { fetchUsage } from "./claudeClient";
 
 // A real reset pushes resets_at forward by 5 hours (5h window) or 7 days (7d window).
@@ -59,12 +59,13 @@ function humanDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
 }
 
-async function checkOnce(
-  config: WatcherConfig,
+export async function checkOnce(
+  account: Account,
   state: Map<WindowKey, WindowState>,
   notifier: Notifier
 ): Promise<UsageResponse> {
-  const usage = await fetchUsage(config);
+  const usage = await fetchUsage(account);
+  const tag = `[${account.name}]`;
 
   const windows = [
     { key: "five_hour" as WindowKey, data: usage.five_hour, label: "5-hour window" },
@@ -76,10 +77,10 @@ async function checkOnce(
     const { fired, nextState } = detectReset(prev, data);
 
     if (fired && prev) {
-      console.log(`[${ts()}] RESET DETECTED — ${label}. Sending notification.`);
+      console.log(`[${ts()}] ${tag} RESET DETECTED — ${label}. Sending notification.`);
 
       await notifier.notify(
-        `*${label} has reset!* Your Claude usage window just refreshed — you're back at full capacity.\n` +
+        `${tag} *${label} has reset!* Your Claude usage window just refreshed — you're back at full capacity.\n` +
         `Next reset scheduled for: ${humanDate(data.resets_at)}`,
         {
           window: key,
@@ -92,7 +93,7 @@ async function checkOnce(
 
     if (nextState === prev) {
       // Implausible timestamp — detectReset kept the previous baseline.
-      console.warn(`[${ts()}] Ignoring suspicious resets_at value (${data.resets_at}) for ${label} — keeping previous baseline.`);
+      console.warn(`[${ts()}] ${tag} Ignoring suspicious resets_at value (${data.resets_at}) for ${label} — keeping previous baseline.`);
     } else {
       state.set(key, nextState);
     }
@@ -102,21 +103,30 @@ async function checkOnce(
 }
 
 export async function runMonitor(config: WatcherConfig, notifier: Notifier): Promise<never> {
-  const state = new Map<WindowKey, WindowState>();
+  // Each account gets its own per-window baseline map so they never cross-contaminate.
+  const states = new Map<string, Map<WindowKey, WindowState>>(
+    config.accounts.map((a) => [a.name, new Map<WindowKey, WindowState>()])
+  );
   const intervalMs = config.check_interval_minutes * 60 * 1000;
 
-  console.log(`[${ts()}] claude-reset started — polling every ${config.check_interval_minutes} min`);
+  console.log(
+    `[${ts()}] claude-reset started — polling every ${config.check_interval_minutes} min — ` +
+    `watching ${config.accounts.length} account(s): ${config.accounts.map((a) => a.name).join(", ")}`
+  );
 
   while (true) {
-    try {
-      const usage = await checkOnce(config, state, notifier);
-      console.log(
-        `[${ts()}] ` +
-        `5h: ${usage.five_hour.utilization}% (resets ${humanDate(usage.five_hour.resets_at)})  |  ` +
-        `7d: ${usage.seven_day.utilization}% (resets ${humanDate(usage.seven_day.resets_at)})`
-      );
-    } catch (err) {
-      console.error(`[${ts()}] ERROR:`, err instanceof Error ? err.message : String(err));
+    for (const account of config.accounts) {
+      // Isolate each account: an expired key on one must not block the others.
+      try {
+        const usage = await checkOnce(account, states.get(account.name)!, notifier);
+        console.log(
+          `[${ts()}] [${account.name}] ` +
+          `5h: ${usage.five_hour.utilization}% (resets ${humanDate(usage.five_hour.resets_at)})  |  ` +
+          `7d: ${usage.seven_day.utilization}% (resets ${humanDate(usage.seven_day.resets_at)})`
+        );
+      } catch (err) {
+        console.error(`[${ts()}] [${account.name}] ERROR:`, err instanceof Error ? err.message : String(err));
+      }
     }
 
     await sleep(intervalMs);
