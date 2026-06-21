@@ -137,6 +137,7 @@ claude-reset status
 | `claude-reset stop` | Stop the background process |
 | `claude-reset logs` | Tail the log file live (Ctrl+C to exit) |
 | `claude-reset status` | One-shot usage snapshot for every account — current utilization and reset times |
+| `claude-reset pulse` | Is the account being used *right now*? Plus 5h/7d utilization and the Opus/Sonnet split. Add `--json` for scripting |
 | `claude-reset test-notify` | Send a test message to Slack — use this to verify your webhook works |
 | `claude-reset add-account` | Add another Claude account to monitor |
 | `claude-reset remove-account <name>` | Remove an account by name |
@@ -184,6 +185,30 @@ claude-reset stop
 # Remove Task Scheduler auto-start entry permanently
 Unregister-ScheduledTask -TaskName "claude-reset" -Confirm:$false
 ```
+
+---
+
+## Activity pulse
+
+`claude-reset pulse` shows whether the account is in active use at this moment, alongside its
+5-hour / 7-day utilization and the per-model split:
+
+```
+  default  —  ● active now
+    5-hour:   38%     7-day:  13%
+    models:  Opus  —    Sonnet 1%
+```
+
+The running monitor also sends a Slack alert **once** each time the account flips from idle to
+active — useful on a shared account to know when someone has started working.
+
+> **Hard limitation — read this.** Because everyone signs into a single shared account,
+> Anthropic exposes **no per-person data**. `pulse` tells you *that the account is being used*
+> and *how much aggregate capacity is consumed* — it **cannot** tell you *who* is using it,
+> *how many* people are on it, or whether it's **Claude Code (CLI) vs the web app**. That data
+> is simply not in the API for a shared account (the private endpoints that would list active
+> sessions/devices don't exist or aren't readable). For true per-member visibility you need
+> separate Team/Enterprise seats.
 
 ---
 
@@ -264,9 +289,10 @@ src/
   types.ts          Shared interfaces — UsageResponse, Account, WatcherConfig, Notifier
   config.ts         Config file read/write, account management, interactive wizards
   claudeClient.ts   HTTP fetch to the private Anthropic usage endpoint
+  pulse.ts          Pure helpers — summarize usage into an activity pulse, detect idle→active
   notifier.ts       SlackNotifier, BroadcastNotifier, WhatsApp stub
   monitor.ts        Per-account polling loop + reset-detection state machine
-  index.ts          CLI entry point — init / add-account / start / status / help
+  index.ts          CLI entry point — init / add-account / start / status / pulse / help
 ```
 
 ---
