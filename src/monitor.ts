@@ -1,5 +1,6 @@
 import type { Account, Notifier, UsageResponse, UsageWindow, WatcherConfig, WindowKey } from "./types";
 import { fetchUsage } from "./claudeClient";
+import { summarizePulse, detectActivation } from "./pulse";
 
 // A real reset pushes resets_at forward by 5 hours (5h window) or 7 days (7d window).
 // We use 1 hour as the minimum threshold to ignore minor API timestamp fluctuations
@@ -107,6 +108,9 @@ export async function runMonitor(config: WatcherConfig, notifier: Notifier): Pro
   const states = new Map<string, Map<WindowKey, WindowState>>(
     config.accounts.map((a) => [a.name, new Map<WindowKey, WindowState>()])
   );
+  // Tracks the last-seen active flag per account so we alert once on idle→active,
+  // not every poll. Undefined until the first reading (no spurious startup alert).
+  const activeStates = new Map<string, boolean>();
   const intervalMs = config.check_interval_minutes * 60 * 1000;
 
   console.log(
@@ -119,8 +123,22 @@ export async function runMonitor(config: WatcherConfig, notifier: Notifier): Pro
       // Isolate each account: an expired key on one must not block the others.
       try {
         const usage = await checkOnce(account, states.get(account.name)!, notifier);
+
+        // Alert once when the shared account transitions from idle to in-use. This says the
+        // account is being used — not who, how many, or whether it's Claude Code vs web.
+        const pulse = summarizePulse(usage);
+        if (detectActivation(activeStates.get(account.name), pulse.active)) {
+          console.log(`[${ts()}] [${account.name}] ACTIVE — account just went in-use. Notifying.`);
+          await notifier.notify(
+            `[${account.name}] *Claude account is now active* — someone started using it ` +
+            `(5h usage ${pulse.five_hour_pct}%, 7d ${pulse.seven_day_pct}%).`
+          );
+        }
+        activeStates.set(account.name, pulse.active);
+
         console.log(
           `[${ts()}] [${account.name}] ` +
+          `${pulse.active ? "active" : "idle"}  |  ` +
           `5h: ${usage.five_hour.utilization}% (resets ${humanDate(usage.five_hour.resets_at)})  |  ` +
           `7d: ${usage.seven_day.utilization}% (resets ${humanDate(usage.seven_day.resets_at)})`
         );
