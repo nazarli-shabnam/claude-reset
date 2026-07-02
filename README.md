@@ -67,18 +67,20 @@ command works immediately — no separate build step needed.
 
 ## Finding your credentials
 
-You need two things from your Claude account:
+You need one thing from your Claude account:
 
 **Session key** (`sk-ant-sid01-...`)
 1. Open [claude.ai](https://claude.ai) → F12 → **Application** tab → **Cookies** → `https://claude.ai`
 2. Copy the value of the `sessionKey` cookie
 
-**Organization UUID**
+> The session key is equivalent to your password. Never share it or commit it to git.
+
+`init`/`add-account` use the session key to auto-detect your organization UUID — you
+don't need to find it yourself. If auto-detection fails for any reason, you'll be
+prompted to paste it manually:
 1. F12 → **Network** tab → reload the page → filter by `organizations`
 2. Click any request — the URL contains `/api/organizations/<uuid>/...`
 3. Copy the UUID
-
-> The session key is equivalent to your password. Never share it or commit it to git.
 
 ---
 
@@ -99,13 +101,14 @@ Your config is saved to `~/.config/claude-reset/config.json` (Windows: `%USERPRO
 `init` configures your first account. Add others with `add-account`:
 
 ```bash
-claude-reset add-account     # prompts for a name + that account's session key + org_id
+claude-reset add-account     # prompts for a name + that account's session key; org_id is auto-detected
 claude-reset accounts        # list configured accounts
 claude-reset remove-account work
 ```
 
-Each account needs **its own** browser session key and org_id — grab them while logged
-into that account (see *Finding your credentials* above). Account-switchers like
+Each account needs **its own** browser session key — grab it while logged into that
+account (see *Finding your credentials* above); the org UUID is detected automatically.
+Account-switchers like
 [`cswap`](https://github.com/realiti4/claude-swap) rotate Claude Code's OAuth tokens,
 which are a *different* credential from the `sessionKey` cookie this tool uses, so they
 can't be reused here. The Slack webhook and check interval are shared across all accounts.
@@ -231,7 +234,7 @@ active — useful on a shared account to know when someone has started working.
 |---|---|---|
 | `accounts[].name` | Label shown in logs and notifications | required |
 | `accounts[].session_key` | `sk-ant-sid01-...` cookie value for that account | required |
-| `accounts[].org_id` | Claude organization UUID for that account | required |
+| `accounts[].org_id` | Claude organization UUID for that account | auto-detected during setup |
 | `slack_webhook_url` | Slack Incoming Webhook URL (shared by all accounts) | required |
 | `check_interval_minutes` | How often to poll | `15` |
 
