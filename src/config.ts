@@ -3,6 +3,7 @@ import path from "path";
 import os from "os";
 import readline from "readline";
 import type { Account, WatcherConfig } from "./types";
+import { discoverOrgId } from "./claudeClient";
 
 const DEFAULTS = {
   check_interval_minutes: 15,
@@ -81,18 +82,32 @@ function prompt(rl: readline.Interface, question: string): Promise<string> {
   return new Promise((resolve) => rl.question(question, resolve));
 }
 
+// Try to detect the org UUID from the session key so the user never has to dig it out
+// of DevTools. Falls back to a manual prompt if detection fails for any reason.
+async function resolveOrgId(rl: readline.Interface, session_key: string): Promise<string> {
+  try {
+    const org_id = await discoverOrgId(session_key);
+    console.log("  Organization detected automatically.");
+    return org_id;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.log(`  Could not auto-detect organization (${detail})`);
+    console.log("  Find it in any authenticated request to claude.ai/api/organizations/<uuid>\n");
+    return (await prompt(rl, "  Organization UUID:              ")).trim();
+  }
+}
+
 export async function runInteractiveInit(): Promise<void> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
   try {
     console.log("\n  claude-reset — first-time setup\n");
-    console.log("  Find your session key in browser DevTools → Application → Cookies → claude.ai → sessionKey");
-    console.log("  Find your org_id in any authenticated request to claude.ai/api/organizations/<uuid>\n");
+    console.log("  Find your session key in browser DevTools → Application → Cookies → claude.ai → sessionKey\n");
 
     const nameRaw           = (await prompt(rl, "  Account name [default]:         ")).trim();
     const name              = nameRaw === "" ? "default" : nameRaw;
     const session_key       = (await prompt(rl, "  Session key (sk-ant-sid01-...): ")).trim();
-    const org_id            = (await prompt(rl, "  Organization UUID:              ")).trim();
+    const org_id            = await resolveOrgId(rl, session_key);
     const slack_webhook_url = (await prompt(rl, "  Slack webhook URL:              ")).trim();
     const intervalRaw       = (await prompt(rl, "  Check interval in minutes [15]: ")).trim();
 
@@ -119,9 +134,9 @@ export async function runInteractiveAddAccount(): Promise<void> {
     console.log("\n  claude-reset — add an account\n");
     const name        = (await prompt(rl, "  Account name:                   ")).trim();
     const session_key = (await prompt(rl, "  Session key (sk-ant-sid01-...): ")).trim();
-    const org_id      = (await prompt(rl, "  Organization UUID:              ")).trim();
+    const org_id      = await resolveOrgId(rl, session_key);
 
-    addAccount(name, session_key, org_id);
+    await addAccount(name, session_key, org_id);
     console.log(`\n  Account "${name}" added.\n`);
   } finally {
     rl.close();
@@ -130,10 +145,11 @@ export async function runInteractiveAddAccount(): Promise<void> {
 
 // ─── Account management ────────────────────────────────────────────────────────
 
-export function addAccount(name: string, session_key: string, org_id: string): void {
-  if (!name || !session_key || !org_id) {
-    throw new Error("Account name, session key, and org_id are all required.");
+export async function addAccount(name: string, session_key: string, org_id?: string): Promise<void> {
+  if (!name || !session_key) {
+    throw new Error("Account name and session key are required.");
   }
+  org_id ??= await discoverOrgId(session_key);
   const config = loadConfig();
   if (config.accounts.some((a) => a.name === name)) {
     throw new Error(`An account named "${name}" already exists.`);

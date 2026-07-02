@@ -87,21 +87,21 @@ describe("config", () => {
   });
 
   describe("addAccount / removeAccount", () => {
-    test("addAccount appends a new account", () => {
+    test("addAccount appends a new account", async () => {
       saveConfig(SAMPLE);
-      addAccount("work", "sk-ant-sid01-work", "work-org");
+      await addAccount("work", "sk-ant-sid01-work", "work-org");
 
       expect(loadConfig().accounts.map((a) => a.name)).toEqual(["default", "work"]);
     });
 
-    test("addAccount rejects a duplicate name", () => {
+    test("addAccount rejects a duplicate name", async () => {
       saveConfig(SAMPLE);
-      expect(() => addAccount("default", "k", "o")).toThrow(/already exists/);
+      await expect(addAccount("default", "k", "o")).rejects.toThrow(/already exists/);
     });
 
-    test("removeAccount drops the named account", () => {
+    test("removeAccount drops the named account", async () => {
       saveConfig(SAMPLE);
-      addAccount("work", "sk-ant-sid01-work", "work-org");
+      await addAccount("work", "sk-ant-sid01-work", "work-org");
       removeAccount("default");
 
       expect(loadConfig().accounts.map((a) => a.name)).toEqual(["work"]);
@@ -115,6 +115,21 @@ describe("config", () => {
     test("removeAccount errors on an unknown name", () => {
       saveConfig(SAMPLE);
       expect(() => removeAccount("ghost")).toThrow(/No account named/);
+    });
+
+    test("addAccount auto-discovers org_id when omitted", async () => {
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = (async () =>
+        new Response(JSON.stringify([{ uuid: "discovered-org" }]), { status: 200 })) as typeof fetch;
+
+      try {
+        saveConfig(SAMPLE);
+        await addAccount("work", "sk-ant-sid01-work");
+
+        expect(loadConfig().accounts.find((a) => a.name === "work")?.org_id).toBe("discovered-org");
+      } finally {
+        globalThis.fetch = realFetch;
+      }
     });
   });
 });
