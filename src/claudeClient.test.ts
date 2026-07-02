@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { fetchUsage } from "./claudeClient";
+import { discoverOrgId, fetchUsage } from "./claudeClient";
 import type { Account } from "./types";
 
 const CONFIG: Account = {
@@ -55,5 +55,37 @@ describe("fetchUsage", () => {
     stubFetch(new Response("server boom", { status: 500 }));
 
     await expect(fetchUsage(CONFIG)).rejects.toThrow(/HTTP 500/);
+  });
+});
+
+describe("discoverOrgId", () => {
+  test("returns the first organization's uuid", async () => {
+    stubFetch(new Response(JSON.stringify([{ uuid: "org-uuid-1" }, { uuid: "org-uuid-2" }]), { status: 200 }));
+
+    expect(await discoverOrgId("sk-ant-sid01-test")).toBe("org-uuid-1");
+  });
+
+  test("maps 401 to an auth-expired error", async () => {
+    stubFetch(new Response("nope", { status: 401 }));
+
+    await expect(discoverOrgId("sk-ant-sid01-test")).rejects.toThrow(/Auth rejected \(HTTP 401\)/);
+  });
+
+  test("rejects an empty organizations list", async () => {
+    stubFetch(new Response(JSON.stringify([]), { status: 200 }));
+
+    await expect(discoverOrgId("sk-ant-sid01-test")).rejects.toThrow(/No organizations found/);
+  });
+
+  test("rejects an unexpected response shape", async () => {
+    stubFetch(new Response(JSON.stringify([{ name: "no uuid field" }]), { status: 200 }));
+
+    await expect(discoverOrgId("sk-ant-sid01-test")).rejects.toThrow(/Unexpected response shape/);
+  });
+
+  test("surfaces non-auth HTTP errors with the status", async () => {
+    stubFetch(new Response("server boom", { status: 500 }));
+
+    await expect(discoverOrgId("sk-ant-sid01-test")).rejects.toThrow(/HTTP 500/);
   });
 });

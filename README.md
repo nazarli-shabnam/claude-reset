@@ -67,18 +67,20 @@ command works immediately — no separate build step needed.
 
 ## Finding your credentials
 
-You need two things from your Claude account:
+You need one thing from your Claude account:
 
 **Session key** (`sk-ant-sid01-...`)
 1. Open [claude.ai](https://claude.ai) → F12 → **Application** tab → **Cookies** → `https://claude.ai`
 2. Copy the value of the `sessionKey` cookie
 
-**Organization UUID**
+> The session key is equivalent to your password. Never share it or commit it to git.
+
+`init`/`add-account` use the session key to auto-detect your organization UUID — you
+don't need to find it yourself. If auto-detection fails for any reason, you'll be
+prompted to paste it manually:
 1. F12 → **Network** tab → reload the page → filter by `organizations`
 2. Click any request — the URL contains `/api/organizations/<uuid>/...`
 3. Copy the UUID
-
-> The session key is equivalent to your password. Never share it or commit it to git.
 
 ---
 
@@ -99,13 +101,14 @@ Your config is saved to `~/.config/claude-reset/config.json` (Windows: `%USERPRO
 `init` configures your first account. Add others with `add-account`:
 
 ```bash
-claude-reset add-account     # prompts for a name + that account's session key + org_id
+claude-reset add-account     # prompts for a name + that account's session key; org_id is auto-detected
 claude-reset accounts        # list configured accounts
 claude-reset remove-account work
 ```
 
-Each account needs **its own** browser session key and org_id — grab them while logged
-into that account (see *Finding your credentials* above). Account-switchers like
+Each account needs **its own** browser session key — grab it while logged into that
+account (see *Finding your credentials* above); the org UUID is detected automatically.
+Account-switchers like
 [`cswap`](https://github.com/realiti4/claude-swap) rotate Claude Code's OAuth tokens,
 which are a *different* credential from the `sessionKey` cookie this tool uses, so they
 can't be reused here. The Slack webhook and check interval are shared across all accounts.
@@ -137,6 +140,7 @@ claude-reset status
 | `claude-reset stop` | Stop the background process |
 | `claude-reset logs` | Tail the log file live (Ctrl+C to exit) |
 | `claude-reset status` | One-shot usage snapshot for every account — current utilization and reset times |
+| `claude-reset pulse` | Is the account being used *right now*? Plus 5h/7d utilization and the Opus/Sonnet split. Add `--json` for scripting |
 | `claude-reset test-notify` | Send a test message to Slack — use this to verify your webhook works |
 | `claude-reset add-account` | Add another Claude account to monitor |
 | `claude-reset remove-account <name>` | Remove an account by name |
@@ -187,6 +191,30 @@ Unregister-ScheduledTask -TaskName "claude-reset" -Confirm:$false
 
 ---
 
+## Activity pulse
+
+`claude-reset pulse` shows whether the account is in active use at this moment, alongside its
+5-hour / 7-day utilization and the per-model split:
+
+```
+  default  —  ● active now
+    5-hour:   38%     7-day:  13%
+    models:  Opus  —    Sonnet 1%
+```
+
+The running monitor also sends a Slack alert **once** each time the account flips from idle to
+active — useful on a shared account to know when someone has started working.
+
+> **Hard limitation — read this.** Because everyone signs into a single shared account,
+> Anthropic exposes **no per-person data**. `pulse` tells you *that the account is being used*
+> and *how much aggregate capacity is consumed* — it **cannot** tell you *who* is using it,
+> *how many* people are on it, or whether it's **Claude Code (CLI) vs the web app**. That data
+> is simply not in the API for a shared account (the private endpoints that would list active
+> sessions/devices don't exist or aren't readable). For true per-member visibility you need
+> separate Team/Enterprise seats.
+
+---
+
 ## Configuration
 
 `~/.config/claude-reset/config.json`
@@ -206,7 +234,7 @@ Unregister-ScheduledTask -TaskName "claude-reset" -Confirm:$false
 |---|---|---|
 | `accounts[].name` | Label shown in logs and notifications | required |
 | `accounts[].session_key` | `sk-ant-sid01-...` cookie value for that account | required |
-| `accounts[].org_id` | Claude organization UUID for that account | required |
+| `accounts[].org_id` | Claude organization UUID for that account | auto-detected during setup |
 | `slack_webhook_url` | Slack Incoming Webhook URL (shared by all accounts) | required |
 | `check_interval_minutes` | How often to poll | `15` |
 
@@ -264,9 +292,10 @@ src/
   types.ts          Shared interfaces — UsageResponse, Account, WatcherConfig, Notifier
   config.ts         Config file read/write, account management, interactive wizards
   claudeClient.ts   HTTP fetch to the private Anthropic usage endpoint
+  pulse.ts          Pure helpers — summarize usage into an activity pulse, detect idle→active
   notifier.ts       SlackNotifier, BroadcastNotifier, WhatsApp stub
   monitor.ts        Per-account polling loop + reset-detection state machine
-  index.ts          CLI entry point — init / add-account / start / status / help
+  index.ts          CLI entry point — init / add-account / start / status / pulse / help
 ```
 
 ---

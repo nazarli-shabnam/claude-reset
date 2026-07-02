@@ -14,11 +14,12 @@ import {
 import { runMonitor } from "./monitor";
 import { SlackNotifier, BroadcastNotifier } from "./notifier";
 import { fetchUsage } from "./claudeClient";
+import { summarizePulse } from "./pulse";
 
 const LOG_PATH = path.join(getConfigDir(), "watcher.log");
 const PID_PATH = path.join(getConfigDir(), "watcher.pid");
 
-const COMMANDS = ["init", "start", "status", "stop", "logs", "test-notify", "add-account", "remove-account", "accounts", "help"] as const;
+const COMMANDS = ["init", "start", "status", "pulse", "stop", "logs", "test-notify", "add-account", "remove-account", "accounts", "help"] as const;
 type Command = (typeof COMMANDS)[number];
 
 const [, , rawCommand = "start"] = process.argv;
@@ -47,6 +48,37 @@ async function main(): Promise<void> {
         }
         console.log();
       }
+      break;
+    }
+
+    case "pulse": {
+      // Best-effort "is the account being used right now, and how hard" view.
+      // Cannot identify who, how many people, or CLI-vs-web — that data isn't exposed
+      // for a shared account. See src/pulse.ts.
+      const config = loadConfig();
+      const asJson = args.includes("--json");
+      const rows: Record<string, unknown>[] = [];
+
+      for (const account of config.accounts) {
+        try {
+          const pulse = summarizePulse(await fetchUsage(account));
+          if (asJson) {
+            rows.push({ account: account.name, ...pulse });
+          } else {
+            const dot = pulse.active ? "● active now" : "○ idle";
+            console.log(`\n  ${account.name}  —  ${dot}`);
+            console.log(`    5-hour:  ${pad(pulse.five_hour_pct)}%     7-day: ${pad(pulse.seven_day_pct)}%`);
+            console.log(`    models:  Opus ${fmtPct(pulse.opus_pct)}   Sonnet ${fmtPct(pulse.sonnet_pct)}`);
+          }
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err);
+          if (asJson) rows.push({ account: account.name, error: detail });
+          else console.log(`\n  ${account.name}\n    failed: ${detail}`);
+        }
+      }
+
+      if (asJson) console.log(JSON.stringify(rows, null, 2));
+      else console.log();
       break;
     }
 
@@ -218,6 +250,7 @@ function printHelp(): void {
     stop                   Stop the background process
     logs                   Tail the log file (Ctrl+C to exit)
     status                 One-shot usage snapshot for every account
+    pulse [--json]         Is the account active now? + 5h/7d + Opus/Sonnet split
     test-notify            Send a test message to your Slack channel
     help                   Show this help text
 
@@ -235,6 +268,10 @@ function fmtDate(iso: string): string {
 
 function pad(n: number): string {
   return String(n).padStart(3, " ");
+}
+
+function fmtPct(n: number | null): string {
+  return n === null ? " — " : `${n}%`;
 }
 
 function die(msg: string, err?: unknown): never {
