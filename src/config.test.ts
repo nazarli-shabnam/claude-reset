@@ -32,7 +32,23 @@ describe("config", () => {
 
   test("saveConfig then loadConfig round-trips", () => {
     saveConfig(SAMPLE);
-    expect(loadConfig()).toEqual(SAMPLE);
+    expect(loadConfig()).toEqual({ ...SAMPLE, notifications: { desktop: true, slack: true } });
+  });
+
+  test("loadConfig no longer requires a Slack webhook — desktop covers it", () => {
+    const { slack_webhook_url, ...noSlack } = SAMPLE;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(noSlack));
+
+    const config = loadConfig();
+    expect(config.slack_webhook_url).toBeUndefined();
+    expect(config.notifications).toEqual({ desktop: true, slack: false });
+  });
+
+  test("loadConfig throws when every notification channel is disabled", () => {
+    const { slack_webhook_url, ...noSlack } = SAMPLE;
+    fs.writeFileSync(getConfigPath(), JSON.stringify({ ...noSlack, notifications: { desktop: false } }));
+
+    expect(() => loadConfig()).toThrow(/no notification channel/);
   });
 
   test("loadConfig applies the default check interval when absent", () => {
@@ -48,7 +64,7 @@ describe("config", () => {
 
   test("loadConfig tolerates a UTF-8 BOM (Windows editors)", () => {
     fs.writeFileSync(getConfigPath(), "﻿" + JSON.stringify(SAMPLE));
-    expect(loadConfig()).toEqual(SAMPLE);
+    expect(loadConfig()).toEqual({ ...SAMPLE, notifications: { desktop: true, slack: true } });
   });
 
   test("loadConfig reports invalid JSON clearly", () => {

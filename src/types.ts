@@ -48,10 +48,19 @@ export interface Account {
   org_id: string;
 }
 
+export interface NotificationSettings {
+  /** Native OS desktop notifications. Defaults to true — the zero-config channel. */
+  desktop?: boolean;
+  /** Slack. Defaults to true when `slack_webhook_url` is set, false otherwise. */
+  slack?: boolean;
+}
+
 export interface WatcherConfig {
   accounts: Account[];
-  slack_webhook_url: string;
+  /** Optional — when absent (or blank) Slack is simply not used; desktop notifications cover it. */
+  slack_webhook_url?: string;
   check_interval_minutes: number;
+  notifications?: NotificationSettings;
 }
 
 // ─── Notifications ────────────────────────────────────────────────────────────

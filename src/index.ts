@@ -13,7 +13,8 @@ import {
   ensureOrgIds,
 } from "./config";
 import { runMonitor } from "./monitor";
-import { SlackNotifier, BroadcastNotifier } from "./notifier";
+import { SlackNotifier, DesktopNotifier, BroadcastNotifier } from "./notifier";
+import type { Notifier, WatcherConfig } from "./types";
 import { fetchUsage } from "./claudeClient";
 import { summarizePulse } from "./pulse";
 
@@ -152,20 +153,23 @@ async function main(): Promise<void> {
       }
 
       const config = await ensureOrgIds(loadConfig());
-      const notifier = new BroadcastNotifier([new SlackNotifier(config.slack_webhook_url)]);
-      await runMonitor(config, notifier);
+      await runMonitor(config, buildNotifier(config));
       break;
     }
 
     case "test-notify": {
       const config = loadConfig();
-      const notifier = new SlackNotifier(config.slack_webhook_url);
+      const notifier = buildNotifier(config);
+      const channels = [
+        config.notifications?.desktop !== false ? "desktop" : null,
+        config.notifications?.slack && config.slack_webhook_url ? "Slack" : null,
+      ].filter(Boolean).join(" + ") || "no channels configured";
       try {
         await notifier.notify(
-          "Test message from claude-reset — if you see this, your Slack webhook is working correctly.",
+          "Test message from claude-reset — if you see this, your notifications are working.",
           { window: "five_hour", utilization_before: 89, utilization_after: 2, resets_at: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString() }
         );
-        console.log("Test notification sent. Check your Slack channel.");
+        console.log(`Test notification sent (${channels}).`);
       } catch (err) {
         die("Failed to send test notification:", err);
       }
@@ -260,6 +264,16 @@ function printHelp(): void {
   Config file: ${getConfigPath()}
   Log file:    ${LOG_PATH}
   `);
+}
+
+/** Assemble the notifier fan-out from config: desktop unless disabled, Slack when configured. */
+function buildNotifier(config: WatcherConfig): BroadcastNotifier {
+  const channels: Notifier[] = [];
+  if (config.notifications?.desktop !== false) channels.push(new DesktopNotifier());
+  if (config.notifications?.slack && config.slack_webhook_url) {
+    channels.push(new SlackNotifier(config.slack_webhook_url));
+  }
+  return new BroadcastNotifier(channels);
 }
 
 function fmtDate(iso: string): string {
