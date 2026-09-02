@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "fs";
 import path from "path";
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import {
   loadConfig,
   runInteractiveInit,
@@ -10,9 +10,11 @@ import {
   configExists,
   getConfigPath,
   getConfigDir,
+  ensureOrgIds,
 } from "./config";
 import { runMonitor } from "./monitor";
-import { SlackNotifier, BroadcastNotifier } from "./notifier";
+import { SlackNotifier, DesktopNotifier, BroadcastNotifier } from "./notifier";
+import type { Notifier, WatcherConfig } from "./types";
 import { fetchUsage } from "./claudeClient";
 import { summarizePulse } from "./pulse";
 
@@ -33,7 +35,7 @@ async function main(): Promise<void> {
       break;
 
     case "status": {
-      const config = loadConfig();
+      const config = await ensureOrgIds(loadConfig());
       console.log("\n  Claude usage snapshot\n");
       for (const account of config.accounts) {
         try {
@@ -55,7 +57,7 @@ async function main(): Promise<void> {
       // Best-effort "is the account being used right now, and how hard" view.
       // Cannot identify who, how many people, or CLI-vs-web — that data isn't exposed
       // for a shared account. See src/pulse.ts.
-      const config = loadConfig();
+      const config = await ensureOrgIds(loadConfig());
       const asJson = args.includes("--json");
       const rows: Record<string, unknown>[] = [];
 
@@ -102,7 +104,7 @@ async function main(): Promise<void> {
       const config = loadConfig();
       console.log("\n  Configured accounts\n");
       for (const account of config.accounts) {
-        console.log(`  - ${account.name}  (org ${account.org_id})`);
+        console.log(`  - ${account.name}  (org ${account.org_id || "not yet detected"})`);
       }
       console.log();
       break;
@@ -150,21 +152,24 @@ async function main(): Promise<void> {
         process.on("SIGINT", () => { cleanup(); process.exit(0); });
       }
 
-      const config = loadConfig();
-      const notifier = new BroadcastNotifier([new SlackNotifier(config.slack_webhook_url)]);
-      await runMonitor(config, notifier);
+      const config = await ensureOrgIds(loadConfig());
+      await runMonitor(config, buildNotifier(config));
       break;
     }
 
     case "test-notify": {
       const config = loadConfig();
-      const notifier = new SlackNotifier(config.slack_webhook_url);
+      const notifier = buildNotifier(config);
+      const channels = [
+        config.notifications?.desktop !== false ? "desktop" : null,
+        config.notifications?.slack && config.slack_webhook_url ? "Slack" : null,
+      ].filter(Boolean).join(" + ") || "no channels configured";
       try {
         await notifier.notify(
-          "Test message from claude-reset — if you see this, your Slack webhook is working correctly.",
+          "Test message from claude-reset — if you see this, your notifications are working.",
           { window: "five_hour", utilization_before: 89, utilization_after: 2, resets_at: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString() }
         );
-        console.log("Test notification sent. Check your Slack channel.");
+        console.log(`Test notification sent (${channels}).`);
       } catch (err) {
         die("Failed to send test notification:", err);
       }
@@ -195,7 +200,6 @@ async function main(): Promise<void> {
       try {
         if (process.platform === "win32") {
           // taskkill terminates the whole tree and is reliable for detached procs.
-          const { execSync } = await import("child_process");
           execSync(`taskkill /PID ${pid} /F /T`, { stdio: "ignore" });
         } else {
           process.kill(pid, "SIGTERM");
@@ -260,6 +264,16 @@ function printHelp(): void {
   Config file: ${getConfigPath()}
   Log file:    ${LOG_PATH}
   `);
+}
+
+/** Assemble the notifier fan-out from config: desktop unless disabled, Slack when configured. */
+function buildNotifier(config: WatcherConfig): BroadcastNotifier {
+  const channels: Notifier[] = [];
+  if (config.notifications?.desktop !== false) channels.push(new DesktopNotifier());
+  if (config.notifications?.slack && config.slack_webhook_url) {
+    channels.push(new SlackNotifier(config.slack_webhook_url));
+  }
+  return new BroadcastNotifier(channels);
 }
 
 function fmtDate(iso: string): string {

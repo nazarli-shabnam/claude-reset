@@ -27,7 +27,11 @@ export interface WindowState {
  * - Implausible/epoch resets_at: keep the previous baseline so it can't poison the
  *   next comparison.
  */
-export function detectReset(prev: WindowState | undefined, data: UsageWindow): {
+export function detectReset(
+  prev: WindowState | undefined,
+  data: UsageWindow,
+  minJumpMs: number = RESET_WINDOW_MIN_MS,
+): {
   fired: boolean;
   nextState: WindowState;
 } {
@@ -39,7 +43,9 @@ export function detectReset(prev: WindowState | undefined, data: UsageWindow): {
 
   const prevMs = new Date(prev.lastResetsAt).getTime();
   const currMs = new Date(data.resets_at).getTime();
-  const fired = currMs - prevMs > RESET_WINDOW_MIN_MS;
+  // A jump only counts as a reset when it clearly exceeds the poll cadence — otherwise a long
+  // check interval (or rolling-window creep in resets_at) could be misread as a fresh window.
+  const fired = currMs - prevMs > Math.max(RESET_WINDOW_MIN_MS, minJumpMs);
 
   // Only persist a plausible timestamp — discard epoch/bogus values so they can't
   // poison the baseline and trigger a false positive (or hide a real one) next poll.
@@ -63,7 +69,8 @@ function humanDate(iso: string): string {
 export async function checkOnce(
   account: Account,
   state: Map<WindowKey, WindowState>,
-  notifier: Notifier
+  notifier: Notifier,
+  minJumpMs: number = RESET_WINDOW_MIN_MS,
 ): Promise<UsageResponse> {
   const usage = await fetchUsage(account);
   const tag = `[${account.name}]`;
@@ -75,7 +82,7 @@ export async function checkOnce(
 
   for (const { key, data, label } of windows) {
     const prev = state.get(key);
-    const { fired, nextState } = detectReset(prev, data);
+    const { fired, nextState } = detectReset(prev, data, minJumpMs);
 
     if (fired && prev) {
       console.log(`[${ts()}] ${tag} RESET DETECTED — ${label}. Sending notification.`);
@@ -112,6 +119,8 @@ export async function runMonitor(config: WatcherConfig, notifier: Notifier): Pro
   // not every poll. Undefined until the first reading (no spurious startup alert).
   const activeStates = new Map<string, boolean>();
   const intervalMs = config.check_interval_minutes * 60 * 1000;
+  // Scale the reset threshold to the poll cadence so a long interval can't misfire.
+  const minJumpMs = Math.max(RESET_WINDOW_MIN_MS, 2 * intervalMs);
 
   console.log(
     `[${ts()}] claude-reset started — polling every ${config.check_interval_minutes} min — ` +
@@ -122,7 +131,7 @@ export async function runMonitor(config: WatcherConfig, notifier: Notifier): Pro
     for (const account of config.accounts) {
       // Isolate each account: an expired key on one must not block the others.
       try {
-        const usage = await checkOnce(account, states.get(account.name)!, notifier);
+        const usage = await checkOnce(account, states.get(account.name)!, notifier, minJumpMs);
 
         // Alert once when the shared account transitions from idle to in-use. This says the
         // account is being used — not who, how many, or whether it's Claude Code vs web.

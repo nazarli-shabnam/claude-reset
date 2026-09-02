@@ -1,6 +1,6 @@
 # claude-reset
 
-A background monitor that watches your Claude Code usage limits and sends a Slack notification the moment your session resets — no more manually refreshing the settings page.
+A background monitor that watches your Claude Code usage limits and notifies you — on your desktop, or in Slack — the moment your session resets, so you don't have to keep refreshing the settings page.
 
 Run multiple Claude accounts? claude-reset watches **all of them at once** and tags every notification with the account name — so it doesn't matter how you switch your active session (`cswap`, manual re-login, etc.); the monitor tracks each account independently.
 
@@ -33,7 +33,7 @@ When a reset is detected it fires a Slack notification exactly once. Your Slack 
 
 - **Node.js ≥ 18** — [download here](https://nodejs.org)
 - A **Claude Pro/Max account** with an active browser session
-- A **Slack Incoming Webhook URL** — [create one here](https://api.slack.com/messaging/webhooks) (free, 2 min)
+- *(optional)* A **Slack Incoming Webhook URL** — [create one here](https://api.slack.com/messaging/webhooks) (free, 2 min). Without it, notifications go to your **desktop** (native OS notification) instead.
 
 ---
 
@@ -141,7 +141,7 @@ claude-reset status
 | `claude-reset logs` | Tail the log file live (Ctrl+C to exit) |
 | `claude-reset status` | One-shot usage snapshot for every account — current utilization and reset times |
 | `claude-reset pulse` | Is the account being used *right now*? Plus 5h/7d utilization and the Opus/Sonnet split. Add `--json` for scripting |
-| `claude-reset test-notify` | Send a test message to Slack — use this to verify your webhook works |
+| `claude-reset test-notify` | Send a test message through every configured channel (desktop and/or Slack) |
 | `claude-reset add-account` | Add another Claude account to monitor |
 | `claude-reset remove-account <name>` | Remove an account by name |
 | `claude-reset accounts` | List configured accounts |
@@ -226,7 +226,8 @@ active — useful on a shared account to know when someone has started working.
     { "name": "personal", "session_key": "sk-ant-sid01-...", "org_id": "..." }
   ],
   "slack_webhook_url": "https://hooks.slack.com/services/...",
-  "check_interval_minutes": 15
+  "check_interval_minutes": 15,
+  "notifications": { "desktop": true, "slack": true }
 }
 ```
 
@@ -235,8 +236,14 @@ active — useful on a shared account to know when someone has started working.
 | `accounts[].name` | Label shown in logs and notifications | required |
 | `accounts[].session_key` | `sk-ant-sid01-...` cookie value for that account | required |
 | `accounts[].org_id` | Claude organization UUID for that account | auto-detected during setup |
-| `slack_webhook_url` | Slack Incoming Webhook URL (shared by all accounts) | required |
+| `slack_webhook_url` | Slack Incoming Webhook URL (shared by all accounts) | optional |
 | `check_interval_minutes` | How often to poll | `15` |
+| `notifications.desktop` | Send a native OS desktop notification | `true` |
+| `notifications.slack` | Post to Slack (needs `slack_webhook_url`) | `true` when a webhook is set |
+
+At least one channel must be enabled. Desktop notifications use the OS's built-in
+mechanism — Windows toast, macOS Notification Center, or `notify-send` on Linux — with
+no extra dependency; a missing Linux `notify-send` is logged as a warning, not fatal.
 
 > **Upgrading from a single-account version?** Old configs with top-level `session_key`
 > and `org_id` are migrated automatically into a single account named `default` — no
@@ -254,7 +261,8 @@ export interface Notifier {
 }
 ```
 
-A **WhatsApp stub** is already in `src/notifier.ts`. To activate it: uncomment `WhatsAppNotifier`, fill in the Twilio/Meta Cloud API call, add credentials to the config, and push it into the `notifiers` array in `src/index.ts`. The `BroadcastNotifier` fans out to all channels simultaneously.
+`SlackNotifier` and `DesktopNotifier` in `src/notifier.ts` are worked reference
+implementations. A **WhatsApp stub** is also there. To activate it: uncomment `WhatsAppNotifier`, fill in the Twilio/Meta Cloud API call, add credentials to the config, and push it into the `notifiers` array in `src/index.ts`. The `BroadcastNotifier` fans out to all channels simultaneously.
 
 ---
 
@@ -271,10 +279,12 @@ A **WhatsApp stub** is already in `src/notifier.ts`. To activate it: uncomment `
 
 ## Testing
 
-The test suite runs on [Bun](https://bun.sh):
+The test suite runs on [Bun](https://bun.sh) (the tests import Bun's built-in runner):
 
 ```bash
 bun test
+# or: npm test  — this first checks that Bun is installed and prints an
+#                 install hint if it isn't, then delegates to `bun test`.
 ```
 
 It covers the reset-detection state machine, config load/save (including malformed and
@@ -290,10 +300,10 @@ real `~/.config/claude-reset`.
 ```
 src/
   types.ts          Shared interfaces — UsageResponse, Account, WatcherConfig, Notifier
-  config.ts         Config file read/write, account management, interactive wizards
+  config.ts         Config file read/write, org_id backfill, account management, wizards
   claudeClient.ts   HTTP fetch to the private Anthropic usage endpoint
   pulse.ts          Pure helpers — summarize usage into an activity pulse, detect idle→active
-  notifier.ts       SlackNotifier, BroadcastNotifier, WhatsApp stub
+  notifier.ts       SlackNotifier, DesktopNotifier, BroadcastNotifier, WhatsApp stub
   monitor.ts        Per-account polling loop + reset-detection state machine
   index.ts          CLI entry point — init / add-account / start / status / pulse / help
 ```
