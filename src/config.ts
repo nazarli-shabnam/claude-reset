@@ -72,6 +72,7 @@ function resolveNotifications(config: Partial<WatcherConfig>): NotificationSetti
   return {
     desktop: config.notifications?.desktop ?? true,
     slack: (config.notifications?.slack ?? true) && hasWebhook,
+    digest: config.notifications?.digest ?? "off",
   };
 }
 

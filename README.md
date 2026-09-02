@@ -157,6 +157,8 @@ claude-reset status
 | `claude-reset logs` | Tail the log file live (Ctrl+C to exit) |
 | `claude-reset status` | One-shot usage snapshot for every account — current utilization and reset times |
 | `claude-reset pulse` | Is the account being used *right now*? Plus 5h/7d utilization and the Opus/Sonnet split. Add `--json` for scripting |
+| `claude-reset dashboard` | Every account in one view — utilization, reset times, model split, live-activity dot, and the full `limits[]` breakdown the settings page collapses. `--json` for the raw payload |
+| `claude-reset timeline` | In-use / idle intervals and window resets, reconstructed from the activity log. `--account <name>`, `--days N` (default 7), `--json` |
 | `claude-reset test-notify` | Send a test message through every configured channel (desktop and/or Slack) |
 | `claude-reset add-account` | Add another Claude account to monitor |
 | `claude-reset remove-account <name>` | Remove an account by name |
@@ -257,6 +259,7 @@ active — useful on a shared account to know when someone has started working.
 | `check_interval_minutes` | How often to poll | `15` |
 | `notifications.desktop` | Send a native OS desktop notification | `true` |
 | `notifications.slack` | Post to Slack (needs `slack_webhook_url`) | `true` when a webhook is set |
+| `notifications.digest` | `"daily"` sends a once-a-day dashboard rollup through the configured channels | `"off"` |
 
 At least one channel must be enabled. Desktop notifications use the OS's built-in
 mechanism — Windows toast, macOS Notification Center, or `notify-send` on Linux — with
@@ -322,8 +325,10 @@ src/
   config.ts         Config file read/write, org_id backfill, account management, wizards
   claudeClient.ts   HTTP fetch to the private Anthropic usage endpoint
   pulse.ts          Pure helpers — summarize usage into an activity pulse, detect idle→active
+  history.ts        Activity timeline — append/read JSONL, pair active↔idle into intervals
+  dashboard.ts      Pure formatter — every account + raw limits[] in one text block
   notifier.ts       SlackNotifier, DesktopNotifier, BroadcastNotifier, WhatsApp stub
-  monitor.ts        Per-account polling loop + reset-detection state machine
+  monitor.ts        Per-account polling loop + reset-detection state machine + daily digest
   index.ts          CLI entry point — init / add-account / start / status / pulse / help
 ```
 

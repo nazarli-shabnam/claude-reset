@@ -1,6 +1,8 @@
 import type { Account, Notifier, UsageResponse, UsageWindow, WatcherConfig, WindowKey } from "./types";
 import { fetchUsage } from "./claudeClient";
-import { summarizePulse, detectActivation } from "./pulse";
+import { summarizePulse } from "./pulse";
+import { recordTransition, appendTimelineEntry } from "./history";
+import { formatDashboard } from "./dashboard";
 
 // A real reset pushes resets_at forward by 5 hours (5h window) or 7 days (7d window).
 // We use 1 hour as the minimum threshold to ignore minor API timestamp fluctuations
@@ -66,14 +68,21 @@ function humanDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
 }
 
+export interface CheckResult {
+  usage: UsageResponse;
+  /** Windows whose reset fired this check — so the caller can log timeline entries. */
+  firedWindows: WindowKey[];
+}
+
 export async function checkOnce(
   account: Account,
   state: Map<WindowKey, WindowState>,
   notifier: Notifier,
   minJumpMs: number = RESET_WINDOW_MIN_MS,
-): Promise<UsageResponse> {
+): Promise<CheckResult> {
   const usage = await fetchUsage(account);
   const tag = `[${account.name}]`;
+  const firedWindows: WindowKey[] = [];
 
   const windows = [
     { key: "five_hour" as WindowKey, data: usage.five_hour, label: "5-hour window" },
@@ -85,6 +94,7 @@ export async function checkOnce(
     const { fired, nextState } = detectReset(prev, data, minJumpMs);
 
     if (fired && prev) {
+      firedWindows.push(key);
       console.log(`[${ts()}] ${tag} RESET DETECTED — ${label}. Sending notification.`);
 
       await notifier.notify(
@@ -107,7 +117,7 @@ export async function checkOnce(
     }
   }
 
-  return usage;
+  return { usage, firedWindows };
 }
 
 export async function runMonitor(config: WatcherConfig, notifier: Notifier): Promise<never> {
@@ -121,6 +131,8 @@ export async function runMonitor(config: WatcherConfig, notifier: Notifier): Pro
   const intervalMs = config.check_interval_minutes * 60 * 1000;
   // Scale the reset threshold to the poll cadence so a long interval can't misfire.
   const minJumpMs = Math.max(RESET_WINDOW_MIN_MS, 2 * intervalMs);
+  // Local date of the last daily digest send, so `notifications.digest: "daily"` fires once/day.
+  let lastDigestDate: string | undefined;
 
   console.log(
     `[${ts()}] claude-reset started — polling every ${config.check_interval_minutes} min — ` +
@@ -128,15 +140,34 @@ export async function runMonitor(config: WatcherConfig, notifier: Notifier): Pro
   );
 
   while (true) {
+    const dashboardRows: { account: string; usage?: UsageResponse; error?: string }[] = [];
+
     for (const account of config.accounts) {
       // Isolate each account: an expired key on one must not block the others.
       try {
-        const usage = await checkOnce(account, states.get(account.name)!, notifier, minJumpMs);
+        const { usage, firedWindows } = await checkOnce(account, states.get(account.name)!, notifier, minJumpMs);
+        dashboardRows.push({ account: account.name, usage });
 
-        // Alert once when the shared account transitions from idle to in-use. This says the
-        // account is being used — not who, how many, or whether it's Claude Code vs web.
         const pulse = summarizePulse(usage);
-        if (detectActivation(activeStates.get(account.name), pulse.active)) {
+
+        // Log every reset to the activity timeline (notifications are sent by checkOnce).
+        for (const window of firedWindows) {
+          appendTimelineEntry({
+            ts: ts(), account: account.name, event: "reset", window,
+            five_hour_pct: pulse.five_hour_pct, seven_day_pct: pulse.seven_day_pct,
+          });
+        }
+
+        // Alert + log once when the shared account flips idle↔active. This says the account is
+        // being used — not who, how many, or whether it's Claude Code vs web.
+        const transition = recordTransition(activeStates.get(account.name), pulse.active);
+        if (transition) {
+          appendTimelineEntry({
+            ts: ts(), account: account.name, event: transition,
+            five_hour_pct: pulse.five_hour_pct, seven_day_pct: pulse.seven_day_pct,
+          });
+        }
+        if (transition === "active") {
           console.log(`[${ts()}] [${account.name}] ACTIVE — account just went in-use. Notifying.`);
           await notifier.notify(
             `[${account.name}] *Claude account is now active* — someone started using it ` +
@@ -152,7 +183,20 @@ export async function runMonitor(config: WatcherConfig, notifier: Notifier): Pro
           `7d: ${usage.seven_day.utilization}% (resets ${humanDate(usage.seven_day.resets_at)})`
         );
       } catch (err) {
-        console.error(`[${ts()}] [${account.name}] ERROR:`, err instanceof Error ? err.message : String(err));
+        const detail = err instanceof Error ? err.message : String(err);
+        dashboardRows.push({ account: account.name, error: detail });
+        console.error(`[${ts()}] [${account.name}] ERROR:`, detail);
+      }
+    }
+
+    // Once-a-day rollup across all accounts, if enabled.
+    const today = new Date().toDateString();
+    if (config.notifications?.digest === "daily" && lastDigestDate !== today) {
+      lastDigestDate = today;
+      try {
+        await notifier.notify(`*Daily usage digest*\n\`\`\`${formatDashboard(dashboardRows)}\`\`\``);
+      } catch (err) {
+        console.error(`[${ts()}] digest send failed:`, err instanceof Error ? err.message : String(err));
       }
     }
 
