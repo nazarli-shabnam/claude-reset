@@ -51,10 +51,29 @@ export function loadConfig(): WatcherConfig {
   for (const account of migrated.accounts) {
     assertAccountField(account, "name");
     assertAccountField(account, "session_key");
-    assertAccountField(account, "org_id");
+    // org_id is intentionally not required here: a migrated legacy config may lack it, and it
+    // is recoverable from the session key. `ensureOrgIds` backfills and persists it.
+    account.org_id ??= "";
   }
 
   return { ...DEFAULTS, ...migrated } as WatcherConfig;
+}
+
+/**
+ * Fill in any missing `org_id` by discovering it from the account's session key, then persist
+ * the result so the lookup only happens once. Call this after `loadConfig` on any code path
+ * that needs to hit the org-scoped usage endpoint.
+ */
+export async function ensureOrgIds(config: WatcherConfig): Promise<WatcherConfig> {
+  let changed = false;
+  for (const account of config.accounts) {
+    if (!account.org_id) {
+      account.org_id = await discoverOrgId(account.session_key);
+      changed = true;
+    }
+  }
+  if (changed) saveConfig(config);
+  return config;
 }
 
 // Migrate a legacy single-account config (top-level session_key/org_id) to the
@@ -82,6 +101,35 @@ function prompt(rl: readline.Interface, question: string): Promise<string> {
   return new Promise((resolve) => rl.question(question, resolve));
 }
 
+/** Re-ask until `validate` accepts the trimmed answer. An empty answer is allowed only when
+ *  `allowEmpty` is set (used for the now-optional Slack webhook). */
+async function promptValidated(
+  rl: readline.Interface,
+  question: string,
+  validate: (value: string) => string | null,
+  allowEmpty = false,
+): Promise<string> {
+  for (;;) {
+    const value = (await prompt(rl, question)).trim();
+    if (value === "" && allowEmpty) return "";
+    const error = validate(value);
+    if (!error) return value;
+    console.log(`  ${error}`);
+  }
+}
+
+export function validateSessionKey(value: string): string | null {
+  return value.startsWith("sk-ant-sid01-")
+    ? null
+    : "That doesn't look like a session key — it should start with \"sk-ant-sid01-\". Try again.";
+}
+
+export function validateSlackWebhook(value: string): string | null {
+  return value.startsWith("https://hooks.slack.com/")
+    ? null
+    : "A Slack webhook URL starts with https://hooks.slack.com/ — paste it again, or leave blank to skip.";
+}
+
 // Try to detect the org UUID from the session key so the user never has to dig it out
 // of DevTools. Falls back to a manual prompt if detection fails for any reason.
 async function resolveOrgId(rl: readline.Interface, session_key: string): Promise<string> {
@@ -106,9 +154,9 @@ export async function runInteractiveInit(): Promise<void> {
 
     const nameRaw           = (await prompt(rl, "  Account name [default]:         ")).trim();
     const name              = nameRaw === "" ? "default" : nameRaw;
-    const session_key       = (await prompt(rl, "  Session key (sk-ant-sid01-...): ")).trim();
+    const session_key       = await promptValidated(rl, "  Session key (sk-ant-sid01-...): ", validateSessionKey);
     const org_id            = await resolveOrgId(rl, session_key);
-    const slack_webhook_url = (await prompt(rl, "  Slack webhook URL:              ")).trim();
+    const slack_webhook_url = await promptValidated(rl, "  Slack webhook URL:              ", validateSlackWebhook);
     const intervalRaw       = (await prompt(rl, "  Check interval in minutes [15]: ")).trim();
 
     const check_interval_minutes = intervalRaw === "" ? 15 : parseInt(intervalRaw, 10);
@@ -133,7 +181,7 @@ export async function runInteractiveAddAccount(): Promise<void> {
   try {
     console.log("\n  claude-reset — add an account\n");
     const name        = (await prompt(rl, "  Account name:                   ")).trim();
-    const session_key = (await prompt(rl, "  Session key (sk-ant-sid01-...): ")).trim();
+    const session_key = await promptValidated(rl, "  Session key (sk-ant-sid01-...): ", validateSessionKey);
     const org_id      = await resolveOrgId(rl, session_key);
 
     await addAccount(name, session_key, org_id);

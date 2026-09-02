@@ -50,6 +50,23 @@ describe("detectReset", () => {
     expect(fired).toBe(false);
   });
 
+  test("with a large minJumpMs, a jump smaller than the poll cadence does not fire", () => {
+    const prev: WindowState = { lastResetsAt: isoFromNow(0), lastUtilization: 30 };
+    // resets_at crept forward 90 min — real for a rolling window polled every 2h, not a reset.
+    const data = window(isoFromNow(90 * 60 * 1000), 32);
+
+    const { fired } = detectReset(prev, data, 4 * HOUR);
+    expect(fired).toBe(false);
+  });
+
+  test("a genuine multi-hour reset still fires even with a large minJumpMs", () => {
+    const prev: WindowState = { lastResetsAt: isoFromNow(0), lastUtilization: 88 };
+    const data = window(isoFromNow(7 * HOUR), 1);
+
+    const { fired } = detectReset(prev, data, 4 * HOUR);
+    expect(fired).toBe(true);
+  });
+
   test("epoch / implausible resets_at is ignored and the previous baseline is kept", () => {
     const prev: WindowState = { lastResetsAt: isoFromNow(5 * HOUR), lastUtilization: 40 };
     const data = window("1970-01-01T00:00:00.000Z", 0);

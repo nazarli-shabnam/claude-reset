@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { addAccount, getConfigPath, loadConfig, removeAccount, saveConfig } from "./config";
+import { addAccount, ensureOrgIds, getConfigPath, loadConfig, removeAccount, saveConfig } from "./config";
 import type { WatcherConfig } from "./types";
 
 let tmpDir: string;
@@ -84,6 +84,42 @@ describe("config", () => {
       { name: "default", session_key: "sk-ant-sid01-legacy", org_id: "legacy-org" },
     ]);
     expect(config.check_interval_minutes).toBe(9);
+  });
+
+  test("loadConfig accepts an account with no org_id (recoverable from the session key)", () => {
+    const legacy = {
+      session_key: "sk-ant-sid01-legacy",
+      slack_webhook_url: "https://hooks.slack.com/services/T/B/X",
+      check_interval_minutes: 9,
+    };
+    fs.writeFileSync(getConfigPath(), JSON.stringify(legacy));
+
+    const config = loadConfig();
+    expect(config.accounts[0].org_id).toBe("");
+  });
+
+  test("ensureOrgIds discovers and persists a missing org_id exactly once", async () => {
+    const realFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      return new Response(JSON.stringify([{ uuid: "backfilled-org" }]), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      fs.writeFileSync(
+        getConfigPath(),
+        JSON.stringify({ session_key: "sk-ant-sid01-x", slack_webhook_url: "https://hooks.slack.com/x", check_interval_minutes: 5 }),
+      );
+
+      await ensureOrgIds(loadConfig());
+      expect(loadConfig().accounts[0].org_id).toBe("backfilled-org");
+
+      await ensureOrgIds(loadConfig()); // already filled → no second lookup
+      expect(calls).toBe(1);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 
   describe("addAccount / removeAccount", () => {

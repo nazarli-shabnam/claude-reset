@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "fs";
 import path from "path";
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import {
   loadConfig,
   runInteractiveInit,
@@ -10,6 +10,7 @@ import {
   configExists,
   getConfigPath,
   getConfigDir,
+  ensureOrgIds,
 } from "./config";
 import { runMonitor } from "./monitor";
 import { SlackNotifier, BroadcastNotifier } from "./notifier";
@@ -33,7 +34,7 @@ async function main(): Promise<void> {
       break;
 
     case "status": {
-      const config = loadConfig();
+      const config = await ensureOrgIds(loadConfig());
       console.log("\n  Claude usage snapshot\n");
       for (const account of config.accounts) {
         try {
@@ -55,7 +56,7 @@ async function main(): Promise<void> {
       // Best-effort "is the account being used right now, and how hard" view.
       // Cannot identify who, how many people, or CLI-vs-web — that data isn't exposed
       // for a shared account. See src/pulse.ts.
-      const config = loadConfig();
+      const config = await ensureOrgIds(loadConfig());
       const asJson = args.includes("--json");
       const rows: Record<string, unknown>[] = [];
 
@@ -102,7 +103,7 @@ async function main(): Promise<void> {
       const config = loadConfig();
       console.log("\n  Configured accounts\n");
       for (const account of config.accounts) {
-        console.log(`  - ${account.name}  (org ${account.org_id})`);
+        console.log(`  - ${account.name}  (org ${account.org_id || "not yet detected"})`);
       }
       console.log();
       break;
@@ -150,7 +151,7 @@ async function main(): Promise<void> {
         process.on("SIGINT", () => { cleanup(); process.exit(0); });
       }
 
-      const config = loadConfig();
+      const config = await ensureOrgIds(loadConfig());
       const notifier = new BroadcastNotifier([new SlackNotifier(config.slack_webhook_url)]);
       await runMonitor(config, notifier);
       break;
@@ -195,7 +196,6 @@ async function main(): Promise<void> {
       try {
         if (process.platform === "win32") {
           // taskkill terminates the whole tree and is reliable for detached procs.
-          const { execSync } = await import("child_process");
           execSync(`taskkill /PID ${pid} /F /T`, { stdio: "ignore" });
         } else {
           process.kill(pid, "SIGTERM");

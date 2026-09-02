@@ -271,10 +271,12 @@ A **WhatsApp stub** is already in `src/notifier.ts`. To activate it: uncomment `
 
 ## Testing
 
-The test suite runs on [Bun](https://bun.sh):
+The test suite runs on [Bun](https://bun.sh) (the tests import Bun's built-in runner):
 
 ```bash
 bun test
+# or: npm test  — this first checks that Bun is installed and prints an
+#                 install hint if it isn't, then delegates to `bun test`.
 ```
 
 It covers the reset-detection state machine, config load/save (including malformed and
