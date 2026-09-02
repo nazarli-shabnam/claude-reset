@@ -22,7 +22,13 @@
     "prepare": "tsc",
     "prepublishOnly": "tsc"
   },
-  "keywords": ["claude", "anthropic", "monitoring", "slack", "claude-code"],
+  "keywords": [
+    "claude",
+    "anthropic",
+    "monitoring",
+    "slack",
+    "claude-code"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -40,5 +46,8 @@
     "@types/node": "^20.0.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "puppeteer-core": "^25.9.0"
   }
 }

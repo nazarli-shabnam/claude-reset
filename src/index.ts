@@ -7,11 +7,14 @@ import {
   runInteractiveInit,
   runInteractiveAddAccount,
   removeAccount,
+  upsertAccount,
   configExists,
   getConfigPath,
   getConfigDir,
+  getBrowserProfileDir,
   ensureOrgIds,
 } from "./config";
+import { captureSessionKey } from "./auth/browserCapture";
 import { runMonitor } from "./monitor";
 import { SlackNotifier, DesktopNotifier, BroadcastNotifier } from "./notifier";
 import type { Notifier, WatcherConfig } from "./types";
@@ -21,7 +24,7 @@ import { summarizePulse } from "./pulse";
 const LOG_PATH = path.join(getConfigDir(), "watcher.log");
 const PID_PATH = path.join(getConfigDir(), "watcher.pid");
 
-const COMMANDS = ["init", "start", "status", "pulse", "stop", "logs", "test-notify", "add-account", "remove-account", "accounts", "help"] as const;
+const COMMANDS = ["init", "login", "start", "status", "pulse", "stop", "logs", "test-notify", "add-account", "remove-account", "accounts", "help"] as const;
 type Command = (typeof COMMANDS)[number];
 
 const [, , rawCommand = "start"] = process.argv;
@@ -81,6 +84,21 @@ async function main(): Promise<void> {
 
       if (asJson) console.log(JSON.stringify(rows, null, 2));
       else console.log();
+      break;
+    }
+
+    case "login": {
+      // Browser-assisted sign-in: opens claude.ai, waits for login, captures the sessionKey
+      // cookie, then adds or refreshes the account. `--account <name>` targets a specific one.
+      const idx = args.indexOf("--account");
+      const name = (idx >= 0 ? args[idx + 1] : undefined) ?? "default";
+
+      const session_key = await captureSessionKey({ userDataDir: getBrowserProfileDir() })
+        .catch((err) => die("Browser login failed:", err));
+
+      const result = await upsertAccount(name, session_key)
+        .catch((err) => die("Could not save the account:", err));
+      console.log(`\n  Account "${name}" ${result}. Run \`claude-reset status\` to verify.\n`);
       break;
     }
 
@@ -246,6 +264,7 @@ function printHelp(): void {
 
   Commands:
     init                   Interactive setup — first account, Slack webhook, interval
+    login [--account <n>]  Sign in via a browser window; captures the session key for you
     add-account            Add another Claude account to monitor
     remove-account <name>  Remove an account by name
     accounts               List configured accounts
