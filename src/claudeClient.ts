@@ -79,7 +79,7 @@ export async function fetchUsage(account: Pick<Account, "session_key" | "org_id"
   if (response.status === 401 || response.status === 403) {
     throw new Error(
       `Auth rejected (HTTP ${response.status}). ` +
-      "Your session key may have expired — re-run `claude-reset init` with a fresh key."
+      "Your session key may have expired — run `claude-reset login` to refresh it."
     );
   }
 

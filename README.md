@@ -12,12 +12,15 @@ Claude enforces two rolling usage caps shared across the CLI and web UI:
 - **5-hour window** — short-term rate limit
 - **7-day window** — weekly cap
 
-claude-reset polls a private Anthropic endpoint every few minutes. It detects a reset
-when the `resets_at` timestamp jumps forward by more than an hour — the unambiguous signal
-that Anthropic issued a fresh window. (Minor timestamp jitter and occasional epoch/`1970`
-glitches from the API are filtered out so they can't trigger a false alarm.)
+claude-reset polls a private Anthropic endpoint every few minutes. It detects a reset when the
+`resets_at` timestamp jumps forward well past the poll interval (at least an hour, and more on
+a long interval) — the unambiguous signal that Anthropic issued a fresh window. (Minor
+timestamp jitter and occasional epoch/`1970` glitches from the API are filtered out so they
+can't trigger a false alarm.)
 
-When a reset is detected it fires a Slack notification exactly once. Your Slack mobile app will receive it like any other message — no need to keep Slack web open.
+When a reset is detected it notifies you exactly once — on your desktop, in Slack, or both,
+depending on your config. A Slack notification reaches your phone like any other message, with
+no need to keep Slack web open.
 
 **What you see in the terminal while it runs:**
 ```
@@ -110,24 +113,24 @@ claude-reset init
 node dist/index.js init
 ```
 
-Your config is saved to `~/.config/claude-reset/config.json` (Windows: `%USERPROFILE%\.config\claude-reset\config.json`) with owner-only read permissions. **Setup only runs once** — future starts read the file silently. Re-run `init` only if your session key expires (you'll see a 401 error in logs) or you want to change settings.
+Your config is saved to `~/.config/claude-reset/config.json` (Windows: `%USERPROFILE%\.config\claude-reset\config.json`) with owner-only read permissions. **Setup only runs once** — future starts read the file silently. If your session key expires (you'll see a 401/403 in the logs) run `claude-reset login` to refresh it; re-run `init` only to change other settings.
 
 ### Watching more than one account
 
 `init` configures your first account. Add others with `add-account`:
 
 ```bash
-claude-reset add-account     # prompts for a name + that account's session key; org_id is auto-detected
+claude-reset add-account     # asks to log in via browser, or paste a key; org_id is auto-detected
 claude-reset accounts        # list configured accounts
 claude-reset remove-account work
 ```
 
-Each account needs **its own** browser session key — grab it while logged into that
-account (see *Finding your credentials* above); the org UUID is detected automatically.
-Account-switchers like
-[`cswap`](https://github.com/realiti4/claude-swap) rotate Claude Code's OAuth tokens,
-which are a *different* credential from the `sessionKey` cookie this tool uses, so they
-can't be reused here. The Slack webhook and check interval are shared across all accounts.
+Each account needs **its own** claude.ai session — `add-account` and
+`claude-reset login --account <name>` sign you in to it (see *Signing in* above); the org UUID
+is detected automatically. Account-switchers like
+[`cswap`](https://github.com/realiti4/claude-swap) rotate Claude Code's OAuth tokens, which are
+a *different* credential from the `sessionKey` cookie this tool uses, so they can't be reused
+here. Notification settings and the check interval are shared across all accounts.
 
 Verify it works:
 ```bash
@@ -221,8 +224,9 @@ Unregister-ScheduledTask -TaskName "claude-reset" -Confirm:$false
     models:  Opus  —    Sonnet 1%
 ```
 
-The running monitor also sends a Slack alert **once** each time the account flips from idle to
-active — useful on a shared account to know when someone has started working.
+The running monitor also notifies you **once** each time the account flips from idle to active
+— useful on a shared account to know when someone has started working — and records every
+idle↔active flip and reset to an activity log you can read back with `claude-reset timeline`.
 
 > **Hard limitation — read this.** Because everyone signs into a single shared account,
 > Anthropic exposes **no per-person data**. `pulse` tells you *that the account is being used*
@@ -246,7 +250,7 @@ active — useful on a shared account to know when someone has started working.
   ],
   "slack_webhook_url": "https://hooks.slack.com/services/...",
   "check_interval_minutes": 15,
-  "notifications": { "desktop": true, "slack": true }
+  "notifications": { "desktop": true, "slack": true, "digest": "off" }
 }
 ```
 
@@ -292,7 +296,7 @@ implementations. A **WhatsApp stub** is also there. To activate it: uncomment `W
 |---|---|
 | `Auth rejected (HTTP 401)` | Session key expired — run `claude-reset login` (or `login --account <name>`) to refresh it |
 | `Config not found` | Run `claude-reset init` first |
-| Slack never fires | Run `claude-reset test-notify` to verify your webhook works. If that succeeds but resets still don't notify, check the logs with `claude-reset logs` to confirm the monitor is running and polling. |
+| Notifications never fire | Run `claude-reset test-notify` to check every configured channel. If that works but resets still don't notify, run `claude-reset logs` to confirm the monitor is running and polling. |
 | `node: command not found` | Node.js isn't installed or not on PATH — [download here](https://nodejs.org) |
 
 ---
@@ -308,10 +312,11 @@ bun test
 ```
 
 It covers the reset-detection state machine, config load/save (including malformed and
-BOM-prefixed files), the Slack/broadcast notifier fan-out, and the usage-API client's
-error handling — all without network access. Tests use the `CLAUDE_RESET_CONFIG_DIR`
-environment variable to point config I/O at a temp directory, so they never touch your
-real `~/.config/claude-reset`.
+BOM-prefixed files, migration, org_id backfill), the notifier fan-out (Slack, desktop,
+broadcast), the browser-capture helpers, the activity-timeline logic, the dashboard formatter,
+and the usage-API client's error handling — all without network access. Tests use the
+`CLAUDE_RESET_CONFIG_DIR` environment variable to point file I/O at a temp directory, so they
+never touch your real `~/.config/claude-reset`.
 
 ---
 
@@ -329,7 +334,7 @@ src/
   dashboard.ts      Pure formatter — every account + raw limits[] in one text block
   notifier.ts       SlackNotifier, DesktopNotifier, BroadcastNotifier, WhatsApp stub
   monitor.ts        Per-account polling loop + reset-detection state machine + daily digest
-  index.ts          CLI entry point — init / add-account / start / status / pulse / help
+  index.ts          CLI entry point — init / login / start / status / pulse / dashboard / timeline / …
 ```
 
 ---
