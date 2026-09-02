@@ -4,6 +4,7 @@ import os from "os";
 import readline from "readline";
 import type { Account, NotificationSettings, WatcherConfig } from "./types";
 import { discoverOrgId } from "./claudeClient";
+import { captureSessionKey } from "./auth/browserCapture";
 
 const DEFAULTS = {
   check_interval_minutes: 15,
@@ -160,16 +161,42 @@ async function resolveOrgId(rl: readline.Interface, session_key: string): Promis
   }
 }
 
+/** Browser profile dir for the login helper — lives beside the config, never the user's. */
+export function getBrowserProfileDir(): string {
+  return path.join(getConfigDir(), "browser-profile");
+}
+
+/**
+ * Get a session key either by driving a browser to the claude.ai login page (default) or by
+ * pasting one. Browser login is offered only on an interactive TTY with a real browser present.
+ */
+async function acquireSessionKey(rl: readline.Interface): Promise<string> {
+  const choice = (await prompt(rl, "  Log in via browser now? [Y/n]:  ")).trim().toLowerCase();
+  const wantsBrowser = choice === "" || choice === "y" || choice === "yes";
+
+  if (wantsBrowser) {
+    try {
+      return await captureSessionKey({ userDataDir: getBrowserProfileDir() });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      console.log(`\n  Browser login unavailable (${detail})`);
+      console.log("  Falling back to manual paste.\n");
+    }
+  }
+
+  console.log("  Session key: DevTools → Application → Cookies → claude.ai → sessionKey\n");
+  return promptValidated(rl, "  Session key (sk-ant-sid01-...): ", validateSessionKey);
+}
+
 export async function runInteractiveInit(): Promise<void> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
   try {
     console.log("\n  claude-reset — first-time setup\n");
-    console.log("  Find your session key in browser DevTools → Application → Cookies → claude.ai → sessionKey\n");
 
     const nameRaw           = (await prompt(rl, "  Account name [default]:         ")).trim();
     const name              = nameRaw === "" ? "default" : nameRaw;
-    const session_key       = await promptValidated(rl, "  Session key (sk-ant-sid01-...): ", validateSessionKey);
+    const session_key       = await acquireSessionKey(rl);
     const org_id            = await resolveOrgId(rl, session_key);
 
     console.log("\n  Notifications go to your desktop by default. Add a Slack webhook to also");
@@ -200,7 +227,7 @@ export async function runInteractiveAddAccount(): Promise<void> {
   try {
     console.log("\n  claude-reset — add an account\n");
     const name        = (await prompt(rl, "  Account name:                   ")).trim();
-    const session_key = await promptValidated(rl, "  Session key (sk-ant-sid01-...): ", validateSessionKey);
+    const session_key = await acquireSessionKey(rl);
     const org_id      = await resolveOrgId(rl, session_key);
 
     await addAccount(name, session_key, org_id);
@@ -223,6 +250,32 @@ export async function addAccount(name: string, session_key: string, org_id?: str
   }
   config.accounts.push({ name, session_key, org_id });
   saveConfig(config);
+}
+
+/**
+ * Add the account if it's new, or refresh an existing account's session key (and re-detect its
+ * org_id). Used by `claude-reset login` to onboard or re-authenticate in one step.
+ */
+export async function upsertAccount(name: string, session_key: string, org_id?: string): Promise<"added" | "updated"> {
+  if (!name || !session_key) {
+    throw new Error("Account name and session key are required.");
+  }
+  org_id ??= await discoverOrgId(session_key);
+
+  if (!configExists()) {
+    throw new Error(`No config yet — run \`claude-reset init\` first.`);
+  }
+  const config = loadConfig();
+  const existing = config.accounts.find((a) => a.name === name);
+  if (existing) {
+    existing.session_key = session_key;
+    existing.org_id = org_id;
+    saveConfig(config);
+    return "updated";
+  }
+  config.accounts.push({ name, session_key, org_id });
+  saveConfig(config);
+  return "added";
 }
 
 export function removeAccount(name: string): void {
