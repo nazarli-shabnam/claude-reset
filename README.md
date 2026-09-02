@@ -65,22 +65,38 @@ command works immediately — no separate build step needed.
 
 ---
 
-## Finding your credentials
+## Signing in
 
-You need one thing from your Claude account:
+The tool authenticates as your browser does — with the `sessionKey` cookie from a logged-in
+claude.ai session. There are two ways to hand it over.
 
-**Session key** (`sk-ant-sid01-...`)
+**Browser login (recommended)** — `claude-reset init`, `add-account`, and `login` can open a
+browser window for you:
+
+```bash
+claude-reset login              # opens claude.ai, waits for you to sign in, captures the key
+claude-reset login --account work
+```
+
+Sign in normally (password or Google/SSO). Once you're in, the window closes and the key is
+saved. The login is remembered in a dedicated browser profile beside your config, so a later
+`login` (e.g. after the key expires) is usually one click. Needs Chrome or Edge installed; set
+`CHROME_PATH` if it's somewhere unusual.
+
+**Manual paste** — pick this at the wizard's first prompt if you'd rather not use the browser
+helper:
 1. Open [claude.ai](https://claude.ai) → F12 → **Application** tab → **Cookies** → `https://claude.ai`
 2. Copy the value of the `sessionKey` cookie
 
 > The session key is equivalent to your password. Never share it or commit it to git.
 
-`init`/`add-account` use the session key to auto-detect your organization UUID — you
-don't need to find it yourself. If auto-detection fails for any reason, you'll be
-prompted to paste it manually:
-1. F12 → **Network** tab → reload the page → filter by `organizations`
-2. Click any request — the URL contains `/api/organizations/<uuid>/...`
-3. Copy the UUID
+Either way, the **organization UUID is auto-detected** from the key — you don't need to find it.
+
+> **Why not "Sign in with Anthropic"?** Anthropic's OAuth is locked to Claude Code and
+> claude.ai — there's no third-party client registration and no device-code grant, and reusing
+> Claude Code's own token from another tool is against their credential-use policy (and
+> actively blocked). Driving a real browser login is the sanctioned path, so that's what this
+> does.
 
 ---
 
@@ -141,10 +157,13 @@ claude-reset status
 | `claude-reset logs` | Tail the log file live (Ctrl+C to exit) |
 | `claude-reset status` | One-shot usage snapshot for every account — current utilization and reset times |
 | `claude-reset pulse` | Is the account being used *right now*? Plus 5h/7d utilization and the Opus/Sonnet split. Add `--json` for scripting |
+| `claude-reset dashboard` | Every account in one view — utilization, reset times, model split, live-activity dot, and the full `limits[]` breakdown the settings page collapses. `--json` for the raw payload |
+| `claude-reset timeline` | In-use / idle intervals and window resets, reconstructed from the activity log. `--account <name>`, `--days N` (default 7), `--json` |
 | `claude-reset test-notify` | Send a test message through every configured channel (desktop and/or Slack) |
 | `claude-reset add-account` | Add another Claude account to monitor |
 | `claude-reset remove-account <name>` | Remove an account by name |
 | `claude-reset accounts` | List configured accounts |
+| `claude-reset login [--account <name>]` | Sign in via a browser window; captures the session key for you |
 | `claude-reset init` | Re-run setup to update credentials or settings |
 
 ### Auto-start on login (Windows)
@@ -240,6 +259,7 @@ active — useful on a shared account to know when someone has started working.
 | `check_interval_minutes` | How often to poll | `15` |
 | `notifications.desktop` | Send a native OS desktop notification | `true` |
 | `notifications.slack` | Post to Slack (needs `slack_webhook_url`) | `true` when a webhook is set |
+| `notifications.digest` | `"daily"` sends a once-a-day dashboard rollup through the configured channels | `"off"` |
 
 At least one channel must be enabled. Desktop notifications use the OS's built-in
 mechanism — Windows toast, macOS Notification Center, or `notify-send` on Linux — with
@@ -270,7 +290,7 @@ implementations. A **WhatsApp stub** is also there. To activate it: uncomment `W
 
 | Error | Fix |
 |---|---|
-| `Auth rejected (HTTP 401)` | Session key expired — grab a fresh cookie and re-run `init` |
+| `Auth rejected (HTTP 401)` | Session key expired — run `claude-reset login` (or `login --account <name>`) to refresh it |
 | `Config not found` | Run `claude-reset init` first |
 | Slack never fires | Run `claude-reset test-notify` to verify your webhook works. If that succeeds but resets still don't notify, check the logs with `claude-reset logs` to confirm the monitor is running and polling. |
 | `node: command not found` | Node.js isn't installed or not on PATH — [download here](https://nodejs.org) |
@@ -300,11 +320,15 @@ real `~/.config/claude-reset`.
 ```
 src/
   types.ts          Shared interfaces — UsageResponse, Account, WatcherConfig, Notifier
+  auth/
+    browserCapture.ts  Drive Chrome/Edge to the claude.ai login page, capture the sessionKey
   config.ts         Config file read/write, org_id backfill, account management, wizards
   claudeClient.ts   HTTP fetch to the private Anthropic usage endpoint
   pulse.ts          Pure helpers — summarize usage into an activity pulse, detect idle→active
+  history.ts        Activity timeline — append/read JSONL, pair active↔idle into intervals
+  dashboard.ts      Pure formatter — every account + raw limits[] in one text block
   notifier.ts       SlackNotifier, DesktopNotifier, BroadcastNotifier, WhatsApp stub
-  monitor.ts        Per-account polling loop + reset-detection state machine
+  monitor.ts        Per-account polling loop + reset-detection state machine + daily digest
   index.ts          CLI entry point — init / add-account / start / status / pulse / help
 ```
 

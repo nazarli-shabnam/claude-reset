@@ -7,21 +7,26 @@ import {
   runInteractiveInit,
   runInteractiveAddAccount,
   removeAccount,
+  upsertAccount,
   configExists,
   getConfigPath,
   getConfigDir,
+  getBrowserProfileDir,
   ensureOrgIds,
 } from "./config";
+import { captureSessionKey } from "./auth/browserCapture";
 import { runMonitor } from "./monitor";
 import { SlackNotifier, DesktopNotifier, BroadcastNotifier } from "./notifier";
 import type { Notifier, WatcherConfig } from "./types";
 import { fetchUsage } from "./claudeClient";
 import { summarizePulse } from "./pulse";
+import { formatDashboard, type DashboardRow } from "./dashboard";
+import { readTimeline, summarizeIntervals } from "./history";
 
 const LOG_PATH = path.join(getConfigDir(), "watcher.log");
 const PID_PATH = path.join(getConfigDir(), "watcher.pid");
 
-const COMMANDS = ["init", "start", "status", "pulse", "stop", "logs", "test-notify", "add-account", "remove-account", "accounts", "help"] as const;
+const COMMANDS = ["init", "login", "start", "status", "pulse", "dashboard", "timeline", "stop", "logs", "test-notify", "add-account", "remove-account", "accounts", "help"] as const;
 type Command = (typeof COMMANDS)[number];
 
 const [, , rawCommand = "start"] = process.argv;
@@ -81,6 +86,74 @@ async function main(): Promise<void> {
 
       if (asJson) console.log(JSON.stringify(rows, null, 2));
       else console.log();
+      break;
+    }
+
+    case "dashboard": {
+      // One combined view across every account, plus the raw limits[] the settings page hides.
+      const config = await ensureOrgIds(loadConfig());
+      const asJson = args.includes("--json");
+
+      const rows: DashboardRow[] = await Promise.all(
+        config.accounts.map(async (account): Promise<DashboardRow> => {
+          try {
+            return { account: account.name, usage: await fetchUsage(account) };
+          } catch (err) {
+            return { account: account.name, error: err instanceof Error ? err.message : String(err) };
+          }
+        }),
+      );
+
+      console.log(asJson ? JSON.stringify(rows, null, 2) : formatDashboard(rows));
+      break;
+    }
+
+    case "timeline": {
+      // Reconstruct in-use / idle intervals + reset markers from the activity log.
+      const asJson = args.includes("--json");
+      const nameIdx = args.indexOf("--account");
+      const account = nameIdx >= 0 ? args[nameIdx + 1] : undefined;
+      const daysIdx = args.indexOf("--days");
+      const days = daysIdx >= 0 ? Number(args[daysIdx + 1]) : 7;
+      const sinceMs = Number.isFinite(days) ? Date.now() - days * 24 * 60 * 60 * 1000 : undefined;
+
+      const entries = readTimeline({ account, sinceMs });
+      if (asJson) {
+        console.log(JSON.stringify({ entries, intervals: summarizeIntervals(entries) }, null, 2));
+        break;
+      }
+
+      if (entries.length === 0) {
+        console.log("\n  No activity recorded yet. The monitor logs transitions while it runs.\n");
+        break;
+      }
+
+      console.log(`\n  Activity — last ${days} day(s)${account ? ` — ${account}` : ""}\n`);
+      for (const iv of summarizeIntervals(entries)) {
+        const mins = iv.duration_ms === null ? "ongoing" : `${Math.round(iv.duration_ms / 60000)} min`;
+        console.log(`  ${iv.account.padEnd(10)} ${fmtDate(iv.start)}  →  ${iv.end ? fmtDate(iv.end) : "now"}   (${mins})`);
+      }
+      const resets = entries.filter((e) => e.event === "reset");
+      if (resets.length > 0) {
+        console.log("\n  Resets:");
+        for (const r of resets) console.log(`  ${r.account.padEnd(10)} ${fmtDate(r.ts)}   ${r.window}`);
+      }
+      console.log();
+      break;
+    }
+
+    case "login": {
+      // Browser-assisted sign-in: opens claude.ai, waits for login, captures the sessionKey
+      // cookie, then adds or refreshes the account. `--account <name>` targets a specific one.
+      const idx = args.indexOf("--account");
+      const name = (idx >= 0 ? args[idx + 1] : undefined) ?? "default";
+
+      const session_key = await captureSessionKey({ userDataDir: getBrowserProfileDir() })
+        .catch((err) => die("Browser login failed:", err));
+
+      const result = await upsertAccount(name, session_key)
+        .catch((err) => die("Could not save the account:", err));
+      console.log(`\n  Account "${name}" ${result}. Run \`claude-reset status\` to verify.\n`);
       break;
     }
 
@@ -246,6 +319,7 @@ function printHelp(): void {
 
   Commands:
     init                   Interactive setup — first account, Slack webhook, interval
+    login [--account <n>]  Sign in via a browser window; captures the session key for you
     add-account            Add another Claude account to monitor
     remove-account <name>  Remove an account by name
     accounts               List configured accounts
@@ -255,6 +329,9 @@ function printHelp(): void {
     logs                   Tail the log file (Ctrl+C to exit)
     status                 One-shot usage snapshot for every account
     pulse [--json]         Is the account active now? + 5h/7d + Opus/Sonnet split
+    dashboard [--json]     Combined view of every account + the raw limits breakdown
+    timeline [--account <n>] [--days N] [--json]
+                           In-use / idle intervals + resets, from the activity log
     test-notify            Send a test message to your Slack channel
     help                   Show this help text
 

@@ -53,6 +53,8 @@ export interface NotificationSettings {
   desktop?: boolean;
   /** Slack. Defaults to true when `slack_webhook_url` is set, false otherwise. */
   slack?: boolean;
+  /** Send a once-a-day dashboard rollup through the configured channels. Default "off". */
+  digest?: "off" | "daily";
 }
 
 export interface WatcherConfig {
