@@ -1,7 +1,7 @@
 {
   "name": "claude-reset",
   "version": "1.2.0",
-  "description": "Background monitor for Claude Code usage limits with Slack notifications",
+  "description": "Background monitor for Claude Code usage limits with desktop or Slack notifications",
   "type": "commonjs",
   "main": "dist/index.js",
   "bin": {

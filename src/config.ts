@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import readline from "readline";
-import type { Account, WatcherConfig } from "./types";
+import type { Account, NotificationSettings, WatcherConfig } from "./types";
 import { discoverOrgId } from "./claudeClient";
 
 const DEFAULTS = {
@@ -42,9 +42,6 @@ export function loadConfig(): WatcherConfig {
 
   const migrated = migrate(parsed);
 
-  if (!migrated.slack_webhook_url) {
-    throw new Error(`Config is missing required field: "slack_webhook_url". Re-run \`claude-reset init\`.`);
-  }
   if (!Array.isArray(migrated.accounts) || migrated.accounts.length === 0) {
     throw new Error(`Config has no accounts. Run \`claude-reset init\` (or \`claude-reset add-account\`).`);
   }
@@ -56,7 +53,25 @@ export function loadConfig(): WatcherConfig {
     account.org_id ??= "";
   }
 
-  return { ...DEFAULTS, ...migrated } as WatcherConfig;
+  const config = { ...DEFAULTS, ...migrated, notifications: resolveNotifications(migrated) } as WatcherConfig;
+
+  if (!config.notifications!.desktop && !config.notifications!.slack) {
+    throw new Error(
+      `Config enables no notification channel. Set a "slack_webhook_url", or leave ` +
+      `"notifications.desktop" at its default. Re-run \`claude-reset init\`.`,
+    );
+  }
+
+  return config;
+}
+
+/** Desktop is on unless explicitly disabled; Slack is on when a webhook exists unless disabled. */
+function resolveNotifications(config: Partial<WatcherConfig>): NotificationSettings {
+  const hasWebhook = typeof config.slack_webhook_url === "string" && config.slack_webhook_url.length > 0;
+  return {
+    desktop: config.notifications?.desktop ?? true,
+    slack: (config.notifications?.slack ?? true) && hasWebhook,
+  };
 }
 
 /**
@@ -156,7 +171,10 @@ export async function runInteractiveInit(): Promise<void> {
     const name              = nameRaw === "" ? "default" : nameRaw;
     const session_key       = await promptValidated(rl, "  Session key (sk-ant-sid01-...): ", validateSessionKey);
     const org_id            = await resolveOrgId(rl, session_key);
-    const slack_webhook_url = await promptValidated(rl, "  Slack webhook URL:              ", validateSlackWebhook);
+
+    console.log("\n  Notifications go to your desktop by default. Add a Slack webhook to also");
+    console.log("  post there (leave blank to skip).\n");
+    const slack_webhook_url = await promptValidated(rl, "  Slack webhook URL [none]:       ", validateSlackWebhook, true);
     const intervalRaw       = (await prompt(rl, "  Check interval in minutes [15]: ")).trim();
 
     const check_interval_minutes = intervalRaw === "" ? 15 : parseInt(intervalRaw, 10);
@@ -166,8 +184,9 @@ export async function runInteractiveInit(): Promise<void> {
 
     saveConfig({
       accounts: [{ name, session_key, org_id }],
-      slack_webhook_url,
+      ...(slack_webhook_url ? { slack_webhook_url } : {}),
       check_interval_minutes,
+      notifications: { desktop: true, slack: Boolean(slack_webhook_url) },
     });
     console.log(`\n  Config saved to ${getConfigPath()} (account "${name}")\n`);
   } finally {
